@@ -1,6 +1,6 @@
 # Kyu
 
-Kyu is a free, open-source macOS menu bar utility for queueing prompts when an AI tool is out of credits, busy, or in the wrong session. Save prompts quickly, then release them later to the AI tool you want.
+Kyu is a free, open-source macOS utility for queueing prompts when you run out of tokens or your agents are busy. Save prompts quickly with a keyboard shortcut, then release them later to your agent of choice.
 
 ![Kyu prompt bar](docs/screenshot-prompt.jpg)
 
@@ -10,15 +10,22 @@ Kyu is a free, open-source macOS menu bar utility for queueing prompts when an A
 - Store prompts locally in a queue.
 - Release one prompt or the entire queue.
 - Export to Clipboard, Claude, Gemini, Cursor, or Codex.
-- Show only installed AI tools in the release picker.
-- Choose whether each AI tool should use the last session or start a new session.
-- Run from the macOS menu bar.
-- Configure the global keyboard shortcut.
+- Configure a custom keyboard shortcut.
 - Optionally start at login.
 
 ## Status
 
 Kyu is an early Tauri app prototype. The web UI is fully previewable today; native macOS packaging requires Rust/Cargo.
+
+## Install
+
+Install Kyu with Homebrew:
+
+```bash
+brew install --cask playground-labs/kyu/kyu
+```
+
+If macOS blocks the app the first time you open it, approve Kyu in System Settings because it is distributed outside the App Store.
 
 ## Install From Source
 
@@ -41,7 +48,7 @@ Restart your terminal after installing Rust.
 ### Setup
 
 ```bash
-git clone https://github.com/your-org/kyu.git
+git clone https://github.com/Playground-Labs/Kyu.git
 cd kyu
 npm install
 ```
