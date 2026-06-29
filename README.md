@@ -1,6 +1,6 @@
 # Kyu
 
-Kyu is a free, open-source macOS utility for queueing prompts when you run out of tokens or your agents are busy. Save prompts quickly with a keyboard shortcut, then release them later to your agent of choice.
+Kyu is a free, open-source macOS utility for queueing prompts when you run out of tokens or your agents are busy. Save prompts quickly with a keyboard shortcut, then release them.
 
 ![Kyu prompt bar](docs/screenshot-prompt.jpg)
 
@@ -9,13 +9,12 @@ Kyu is a free, open-source macOS utility for queueing prompts when you run out o
 - Capture prompts from a Spotlight-style prompt bar.
 - Store prompts locally in a queue.
 - Release one prompt or the entire queue.
-- Export to Clipboard, Claude, Gemini, Cursor, or Codex.
 - Configure a custom keyboard shortcut.
 - Optionally start at login.
 
 ## Status
 
-Kyu is an early Tauri app prototype. The web UI is fully previewable today; native macOS packaging requires Rust/Cargo.
+Kyu is currently an early prototype.
 
 ## Install
 
