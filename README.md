@@ -109,4 +109,4 @@ npm run tauri -- dev
 
 ## License
 
-Kyu is intended to be free and open source. Add a license file before publishing the repository.
+Kyu is free and open source under the [MIT License](LICENSE).
