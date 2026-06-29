@@ -10,13 +10,13 @@ name = "kyu_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2.2.0", features = [] }
+tauri-build = { version = "2.5.1", features = [] }
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri = { version = "2.5.0", features = ["tray-icon", "macos-private-api"] }
-tauri-plugin-autostart = "2.2.0"
-tauri-plugin-global-shortcut = "2.2.0"
+tauri = { version = "2.11.3", features = ["tray-icon", "macos-private-api"] }
+tauri-plugin-autostart = "2.5.1"
+tauri-plugin-global-shortcut = "2.3.2"
 uuid = { version = "1.11.0", features = ["v4", "serde"] }
