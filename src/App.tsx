@@ -1,4 +1,5 @@
-import { FormEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, PointerEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
   Check,
@@ -7,76 +8,50 @@ import {
   Keyboard,
   ListPlus,
   ListTodo,
-  Send,
   Settings2,
   ToggleLeft,
   ToggleRight,
   Trash2,
 } from "lucide-react";
-import { SiClaude, SiGooglegemini, SiOpenai } from "react-icons/si";
-import type { IconType } from "react-icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import {
-  AgentTarget,
   QueuedPrompt,
-  SessionMode,
-  SessionPreferences,
-  agentLabel,
   deletePrompt,
-  installedTargets,
   loadStore,
   releasePrompts,
   savePrompt,
   setPreference,
-  setSessionPreference,
   setShortcut,
-  sessionModeLabel,
 } from "@/lib/prompts";
-
-type ReleaseIntent = {
-  ids: string[];
-  key: string;
-};
 
 type StatusMessage = {
   id: number;
   text: string;
 };
 
-const releaseTargets: AgentTarget[] = ["clipboard", "claude", "gemini", "cursor", "codex"];
-const sessionTargets: Array<Exclude<AgentTarget, "clipboard">> = ["claude", "gemini", "cursor", "codex"];
-
-const targetIcons: Record<AgentTarget, IconType | typeof Clipboard> = {
-  clipboard: Clipboard,
-  claude: SiClaude,
-  gemini: SiGooglegemini,
-  cursor: CursorLogo,
-  codex: SiOpenai,
-};
-
 export function App() {
   const isNative = "__TAURI_INTERNALS__" in window;
   const [prompt, setPrompt] = useState("");
   const [queue, setQueue] = useState<QueuedPrompt[]>([]);
-  const [availableTargets, setAvailableTargets] = useState<AgentTarget[]>(["clipboard"]);
   const [shortcut, setShortcutValue] = useState("CommandOrControl+Space");
   const [shortcutDraft, setShortcutDraft] = useState("CommandOrControl+Space");
   const [showMenuBar, setShowMenuBar] = useState(true);
   const [startAtLogin, setStartAtLogin] = useState(false);
-  const [sessionPreferences, setSessionPreferences] = useState<SessionPreferences>({
-    claude: "lastSession",
-    gemini: "lastSession",
-    cursor: "lastSession",
-    codex: "lastSession",
-  });
   const [showQueue, setShowQueue] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [releaseIntent, setReleaseIntent] = useState<ReleaseIntent | null>(null);
   const [status, setStatus] = useState<StatusMessage | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const shellRef = useRef<HTMLElement | null>(null);
+  const dragRef = useRef<{
+    pointerId: number;
+    startCursorX: number;
+    startCursorY: number;
+    startWindowX: number;
+    startWindowY: number;
+  } | null>(null);
   const statusTimeoutRef = useRef<number | null>(null);
 
   function showStatus(text: string, persistent = false) {
@@ -108,11 +83,6 @@ export function App() {
       setShortcutDraft(store.shortcut);
       setShowMenuBar(store.showMenuBar);
       setStartAtLogin(store.startAtLogin);
-      setSessionPreferences(store.sessionPreferences);
-    });
-
-    installedTargets().then((targets) => {
-      setAvailableTargets(targets.length ? targets : ["clipboard"]);
     });
   }, []);
 
@@ -120,13 +90,33 @@ export function App() {
     inputRef.current?.focus();
   }, []);
 
+  useLayoutEffect(() => {
+    if (!isNative || !shellRef.current) return;
+
+    const shell = shellRef.current;
+
+    const resizeToShell = () => {
+      const rect = shell.getBoundingClientRect();
+      void invoke("resize_window_to", {
+        width: Math.ceil(rect.width),
+        height: Math.ceil(rect.height),
+      }).catch(() => undefined);
+    };
+
+    resizeToShell();
+    const observer = new ResizeObserver(resizeToShell);
+    observer.observe(shell);
+
+    return () => observer.disconnect();
+  }, [isNative, showQueue, showSettings, queue.length]);
+
   useEffect(() => {
     if (!isNative) return;
 
     const unlisteners = Promise.all([
       listen("kyu-focus", () => inputRef.current?.focus()),
       listen("kyu-release-all", () => {
-        startRelease([]);
+        void release([]);
       }),
     ]);
 
@@ -140,11 +130,6 @@ export function App() {
     if (queue.length === 1) return "1 prompt waiting";
     return `${queue.length} prompts waiting`;
   }, [queue.length]);
-
-  const visibleTargets = useMemo(
-    () => releaseTargets.filter((target) => availableTargets.includes(target)),
-    [availableTargets],
-  );
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -161,35 +146,21 @@ export function App() {
     showStatus("Saved");
     setShowQueue(true);
     setShowSettings(false);
-    setReleaseIntent(null);
   }
 
-  function startRelease(ids: string[]) {
+  async function release(ids: string[]) {
     const releasedCount = ids.length || queue.length;
     if (!releasedCount) return;
 
-    setShowQueue(true);
-    setShowSettings(false);
-    setReleaseIntent({ ids, key: ids.length ? ids.join(":") : "all" });
-    showStatus("Release to...", true);
-  }
-
-  async function release(agent: AgentTarget, ids: string[]) {
-    const releasedCount = ids.length || queue.length;
-    if (!releasedCount) return;
-
-    const bundle = await releasePrompts(ids, agent);
-    await navigator.clipboard.writeText(bundle);
+    const bundle = await releasePrompts(ids);
+    await navigator.clipboard.writeText(bundle).catch(() => undefined);
     setQueue((current) => (ids.length ? current.filter((item) => !ids.includes(item.id)) : []));
-    setReleaseIntent(null);
-    const sessionText = agent === "clipboard" ? "" : `, ${sessionModeLabel(sessionPreferences[agent])}`;
-    showStatus(`${releasedCount} prompt${releasedCount === 1 ? "" : "s"} copied to ${agentLabel(agent)}${sessionText}`);
+    showStatus(`${releasedCount} prompt${releasedCount === 1 ? "" : "s"} copied`);
   }
 
   async function remove(id: string) {
     const prompts = await deletePrompt(id);
     setQueue(prompts);
-    setReleaseIntent((current) => (current?.ids.includes(id) ? null : current));
     showStatus("Removed");
   }
 
@@ -209,20 +180,64 @@ export function App() {
     showStatus(key === "showMenuBar" ? "Menu bar saved" : "Login saved");
   }
 
-  async function updateSessionPreference(target: Exclude<AgentTarget, "clipboard">, mode: SessionMode) {
-    const store = await setSessionPreference(target, mode);
-    setSessionPreferences(store.sessionPreferences);
-    showStatus(`${agentLabel(target)}: ${sessionModeLabel(mode)}`);
+  async function startWindowDrag(event: PointerEvent<HTMLElement>) {
+    if (!isNative || event.button !== 0) return;
+
+    const target = event.target as HTMLElement;
+    if (target.closest("button, select, textarea, a, [role='button'], [data-no-window-drag]")) return;
+
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    try {
+      await invoke("start_native_drag");
+      return;
+    } catch {
+      // Fall back to explicit positioning when native dragging is unavailable.
+    }
+
+    const [x, y] = await invoke<[number, number]>("window_position");
+
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startCursorX: event.screenX,
+      startCursorY: event.screenY,
+      startWindowX: x,
+      startWindowY: y,
+    };
+  }
+
+  function moveWindow(event: PointerEvent<HTMLElement>) {
+    if (!isNative || dragRef.current?.pointerId !== event.pointerId) return;
+
+    const drag = dragRef.current;
+    void invoke("move_window_to", {
+      x: Math.round(drag.startWindowX + event.screenX - drag.startCursorX),
+      y: Math.round(drag.startWindowY + event.screenY - drag.startCursorY),
+    }).catch(() => undefined);
+  }
+
+  function stopWindowDrag(event: PointerEvent<HTMLElement>) {
+    if (dragRef.current?.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    event.currentTarget.releasePointerCapture(event.pointerId);
   }
 
   return (
     <main
       className={cn(
-        "flex min-h-[100dvh] items-start justify-center p-5 pt-8",
+        "flex min-h-[100dvh] items-start justify-center",
         !isNative && "bg-[linear-gradient(135deg,#e7ebf0_0%,#f8fafc_42%,#dde4ec_100%)]",
       )}
     >
-      <section className="spotlight-shell w-full max-w-3xl overflow-hidden rounded-[28px]">
+      <section
+        ref={shellRef}
+        className="spotlight-shell w-full max-w-3xl overflow-hidden rounded-[28px]"
+        onPointerDown={startWindowDrag}
+        onPointerMove={moveWindow}
+        onPointerUp={stopWindowDrag}
+        onPointerCancel={stopWindowDrag}
+      >
         <form onSubmit={handleSubmit} className="flex items-center gap-3 px-4 py-3">
           <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
             <ListPlus className="size-4" aria-hidden="true" />
@@ -267,7 +282,6 @@ export function App() {
                   const next = !open;
                   if (next) {
                     setShowQueue(false);
-                    setReleaseIntent(null);
                   }
                   return next;
                 });
@@ -296,7 +310,7 @@ export function App() {
                 <Keyboard className="size-4" />
                 Keyboard shortcut
               </span>
-              <Input value={shortcutDraft} onChange={(event) => setShortcutDraft(event.target.value)} />
+              <Input value={shortcutDraft} onChange={(event) => setShortcutDraft(event.target.value)} data-no-window-drag />
             </label>
             <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
               <span>Current shortcut: {shortcut}</span>
@@ -317,22 +331,6 @@ export function App() {
                 onChange={(checked) => updatePreference("startAtLogin", checked)}
               />
             </div>
-            <div className="mt-4 border-t border-border/70 pt-3">
-              <div className="mb-2 flex items-center justify-between">
-                <p className="text-sm font-semibold">Session handling</p>
-                <p className="text-xs text-muted-foreground">Per tool</p>
-              </div>
-              <div className="grid gap-2">
-                {sessionTargets.map((target) => (
-                  <SessionModeRow
-                    key={target}
-                    target={target}
-                    mode={sessionPreferences[target]}
-                    onChange={(mode) => updateSessionPreference(target, mode)}
-                  />
-                ))}
-              </div>
-            </div>
         </AnimatedPanel>
 
         <AnimatedPanel
@@ -346,11 +344,7 @@ export function App() {
               </div>
               <ReleaseControl
                 disabled={!queue.length}
-                expanded={releaseIntent?.key === "all"}
-                targets={visibleTargets}
-                onStart={() => startRelease([])}
-                onCancel={() => setReleaseIntent(null)}
-                onRelease={(agent) => release(agent, [])}
+                onRelease={() => release([])}
               />
             </div>
             <ScrollArea className="max-h-[380px] px-2 pb-3">
@@ -365,11 +359,7 @@ export function App() {
                       <div className="flex items-center gap-1">
                         <ReleaseControl
                           compact
-                          expanded={releaseIntent?.key === item.id}
-                          targets={visibleTargets}
-                          onStart={() => startRelease([item.id])}
-                          onCancel={() => setReleaseIntent(null)}
-                          onRelease={(agent) => release(agent, [item.id])}
+                          onRelease={() => release([item.id])}
                         />
                         <Button type="button" variant="ghost" size="icon" title="Remove prompt" onClick={() => remove(item.id)}>
                           <Trash2 />
@@ -481,105 +471,25 @@ function AnimatedStatus({ status }: { status: StatusMessage | null }) {
 function ReleaseControl({
   compact = false,
   disabled = false,
-  expanded,
-  targets,
-  onStart,
-  onCancel,
   onRelease,
 }: {
   compact?: boolean;
   disabled?: boolean;
-  expanded: boolean;
-  targets: AgentTarget[];
-  onStart: () => void;
-  onCancel: () => void;
-  onRelease: (agent: AgentTarget) => void;
+  onRelease: () => void;
 }) {
-  const [renderTargets, setRenderTargets] = useState(expanded);
-  const [closing, setClosing] = useState(false);
-
-  useEffect(() => {
-    if (expanded) {
-      setRenderTargets(true);
-      setClosing(false);
-      return;
-    }
-
-    if (!renderTargets) return;
-
-    setClosing(true);
-    const timeout = window.setTimeout(() => {
-      setRenderTargets(false);
-      setClosing(false);
-    }, 340);
-
-    return () => window.clearTimeout(timeout);
-  }, [expanded, renderTargets]);
-
-  if (renderTargets) {
-    return (
-      <div className={cn("release-targets flex items-center gap-1", closing && "release-targets-out")}>
-        {targets.map((target, index) => {
-          const Icon = targetIcons[target];
-          return (
-            <Button
-              key={target}
-              type="button"
-              variant={target === "clipboard" ? "default" : "secondary"}
-              size="icon"
-              title={`Release to ${agentLabel(target)}`}
-              className={cn("size-9 origin-center", closing ? "release-target-button-out" : "release-target-button")}
-              style={{ animationDelay: `${(closing ? targets.length - index - 1 : index) * (closing ? 24 : 38)}ms` }}
-              onClick={() => onRelease(target)}
-            >
-              <Icon className="size-4" />
-            </Button>
-          );
-        })}
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          title="Cancel release"
-          className={cn("size-9 origin-center", closing ? "release-target-button-out" : "release-target-button")}
-          style={{ animationDelay: `${(closing ? 0 : targets.length) * 32}ms` }}
-          onClick={onCancel}
-        >
-          <CornerDownLeft className="rotate-180" />
-        </Button>
-      </div>
-    );
-  }
-
   return (
     <Button
       type="button"
       disabled={disabled}
       variant={compact ? "ghost" : "default"}
       size={compact ? "icon" : "default"}
-      title="Release to..."
+      title="Copy to clipboard"
       className="release-main-button origin-center"
-      onClick={onStart}
+      onClick={onRelease}
     >
-      <Send />
-      {compact ? null : "Release all"}
+      <Clipboard />
+      {compact ? null : "Copy all"}
     </Button>
-  );
-}
-
-function CursorLogo({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className={className} fill="none">
-      <path
-        d="M12 2.75 21.25 12 12 21.25 2.75 12 12 2.75Z"
-        fill="currentColor"
-      />
-      <path
-        d="M8.15 7.1 16.9 12l-8.75 4.9 2.2-4.9-2.2-4.9Z"
-        fill="white"
-        fillOpacity="0.92"
-      />
-    </svg>
   );
 }
 
@@ -603,50 +513,5 @@ function PreferenceToggle({
       <span>{label}</span>
       <Icon className={cn("size-5", checked ? "text-primary" : "text-muted-foreground")} />
     </button>
-  );
-}
-
-function SessionModeRow({
-  target,
-  mode,
-  onChange,
-}: {
-  target: Exclude<AgentTarget, "clipboard">;
-  mode: SessionMode;
-  onChange: (mode: SessionMode) => void;
-}) {
-  const Icon = targetIcons[target];
-
-  return (
-    <div className="grid grid-cols-[minmax(96px,1fr)_auto] items-center gap-3 rounded-lg px-2 py-1.5">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground">
-          <Icon className="size-3.5" />
-        </span>
-        <span className="truncate text-sm font-medium">{agentLabel(target)}</span>
-      </div>
-      <div className="grid grid-cols-2 rounded-full bg-secondary p-0.5">
-        <button
-          type="button"
-          className={cn(
-            "h-7 rounded-full px-3 text-xs font-medium transition-colors",
-            mode === "lastSession" ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-          )}
-          onClick={() => onChange("lastSession")}
-        >
-          Last
-        </button>
-        <button
-          type="button"
-          className={cn(
-            "h-7 rounded-full px-3 text-xs font-medium transition-colors",
-            mode === "newSession" ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-          )}
-          onClick={() => onChange("newSession")}
-        >
-          New
-        </button>
-      </div>
-    </div>
   );
 }

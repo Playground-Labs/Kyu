@@ -1,10 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
+    io::Write,
     path::PathBuf,
+    process::{Command, Stdio},
     sync::{Arc, Mutex},
 };
 use tauri::{
+    PhysicalPosition,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, Runtime, State, WindowEvent,
@@ -28,68 +31,19 @@ struct Store {
     prompts: Vec<QueuedPrompt>,
     #[serde(default = "default_shortcut")]
     shortcut: String,
-    #[serde(default)]
-    agent: AgentTarget,
     #[serde(default = "default_true")]
     show_menu_bar: bool,
     #[serde(default)]
     start_at_login: bool,
     #[serde(default)]
-    session_preferences: SessionPreferences,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum AgentTarget {
-    Chatgpt,
-    Claude,
-    Gemini,
-    Cursor,
-    Codex,
-    Clipboard,
+    window_position: Option<SavedWindowPosition>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct SessionPreferences {
-    #[serde(default)]
-    claude: SessionMode,
-    #[serde(default)]
-    gemini: SessionMode,
-    #[serde(default)]
-    cursor: SessionMode,
-    #[serde(default)]
-    codex: SessionMode,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-enum SessionMode {
-    LastSession,
-    NewSession,
-}
-
-impl Default for SessionMode {
-    fn default() -> Self {
-        Self::LastSession
-    }
-}
-
-impl Default for SessionPreferences {
-    fn default() -> Self {
-        Self {
-            claude: SessionMode::LastSession,
-            gemini: SessionMode::LastSession,
-            cursor: SessionMode::LastSession,
-            codex: SessionMode::LastSession,
-        }
-    }
-}
-
-impl Default for AgentTarget {
-    fn default() -> Self {
-        Self::Clipboard
-    }
+struct SavedWindowPosition {
+    x: i32,
+    y: i32,
 }
 
 impl Default for Store {
@@ -97,10 +51,9 @@ impl Default for Store {
         Self {
             prompts: Vec::new(),
             shortcut: default_shortcut(),
-            agent: AgentTarget::Clipboard,
             show_menu_bar: true,
             start_at_login: false,
-            session_preferences: SessionPreferences::default(),
+            window_position: None,
         }
     }
 }
@@ -166,33 +119,41 @@ fn delete_prompt(id: String, state: State<StoreState>) -> Result<Vec<QueuedPromp
 }
 
 #[tauri::command]
-fn release_prompts(ids: Vec<String>, agent: AgentTarget, state: State<StoreState>) -> Result<String, String> {
-    let mut store = state.inner.lock().expect("store lock poisoned");
-    let selected: Vec<QueuedPrompt> = if ids.is_empty() {
-        store.prompts.clone()
-    } else {
-        store
-            .prompts
-            .iter()
-            .filter(|prompt| ids.contains(&prompt.id))
-            .cloned()
-            .collect()
+fn release_prompts(ids: Vec<String>, state: State<StoreState>) -> Result<String, String> {
+    let selected = {
+        let store = state.inner.lock().expect("store lock poisoned");
+        if ids.is_empty() {
+            store.prompts.clone()
+        } else {
+            store
+                .prompts
+                .iter()
+                .filter(|prompt| ids.contains(&prompt.id))
+                .cloned()
+                .collect()
+        }
     };
 
     let bundle = selected
         .iter()
         .enumerate()
-        .map(|(index, prompt)| format!("Prompt {} for {}\n\n{}", index + 1, agent_label(&agent), prompt.body.trim()))
+        .map(|(index, prompt)| format!("Prompt {}\n\n{}", index + 1, prompt.body.trim()))
         .collect::<Vec<String>>()
         .join("\n\n---\n\n");
 
-    if ids.is_empty() {
-        store.prompts.clear();
-    } else {
-        store.prompts.retain(|prompt| !ids.contains(&prompt.id));
+    let selected_ids = selected
+        .iter()
+        .map(|prompt| prompt.id.clone())
+        .collect::<Vec<String>>();
+
+    copy_to_clipboard(&bundle)?;
+
+    {
+        let mut store = state.inner.lock().expect("store lock poisoned");
+        store.prompts.retain(|prompt| !selected_ids.contains(&prompt.id));
+        write_store(&state, &store)?;
     }
-    store.agent = agent;
-    write_store(&state, &store)?;
+
     Ok(bundle)
 }
 
@@ -206,14 +167,6 @@ fn set_shortcut<R: Runtime>(shortcut: String, app: AppHandle<R>, state: State<St
     store.shortcut = shortcut.clone();
     write_store(&state, &store)?;
     Ok(shortcut)
-}
-
-#[tauri::command]
-fn set_agent(agent: AgentTarget, state: State<StoreState>) -> Result<AgentTarget, String> {
-    let mut store = state.inner.lock().expect("store lock poisoned");
-    store.agent = agent.clone();
-    write_store(&state, &store)?;
-    Ok(agent)
 }
 
 #[derive(Debug, Deserialize)]
@@ -254,74 +207,52 @@ fn set_preference<R: Runtime>(
 }
 
 #[tauri::command]
-fn set_session_preference(
-    target: AgentTarget,
-    mode: SessionMode,
-    state: State<StoreState>,
-) -> Result<Store, String> {
-    let mut store = state.inner.lock().expect("store lock poisoned");
-
-    match target {
-        AgentTarget::Claude => store.session_preferences.claude = mode,
-        AgentTarget::Gemini => store.session_preferences.gemini = mode,
-        AgentTarget::Cursor => store.session_preferences.cursor = mode,
-        AgentTarget::Codex => store.session_preferences.codex = mode,
-        AgentTarget::Clipboard | AgentTarget::Chatgpt => {
-            return Err("Session preference is only available for AI app targets".to_string());
-        }
-    }
-
-    write_store(&state, &store)?;
-    Ok(store.clone())
+fn start_native_drag<R: Runtime>(window: tauri::WebviewWindow<R>) -> Result<(), String> {
+    window.start_dragging().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn installed_targets() -> Vec<AgentTarget> {
-    let targets = [
-        AgentTarget::Clipboard,
-        AgentTarget::Claude,
-        AgentTarget::Gemini,
-        AgentTarget::Cursor,
-        AgentTarget::Codex,
-    ];
-
-    targets
-        .into_iter()
-        .filter(|target| target_available(target))
-        .collect()
+fn move_window_to<R: Runtime>(x: i32, y: i32, window: tauri::WebviewWindow<R>, state: State<StoreState>) -> Result<(), String> {
+    window
+        .set_position(PhysicalPosition::new(x, y))
+        .map_err(|error| error.to_string())?;
+    remember_webview_window_position(&window, &state);
+    Ok(())
 }
 
-fn target_available(target: &AgentTarget) -> bool {
-    match target {
-        AgentTarget::Clipboard => true,
-        AgentTarget::Claude => app_exists(&["Claude.app"]),
-        AgentTarget::Gemini => app_exists(&["Gemini.app", "Google Gemini.app"]),
-        AgentTarget::Cursor => app_exists(&["Cursor.app"]),
-        AgentTarget::Codex => app_exists(&["Codex.app", "OpenAI Codex.app"]),
-        AgentTarget::Chatgpt => app_exists(&["ChatGPT.app"]),
+#[tauri::command]
+fn resize_window_to<R: Runtime>(width: f64, height: f64, window: tauri::WebviewWindow<R>) -> Result<(), String> {
+    window
+        .set_size(tauri::LogicalSize::new(width, height))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn window_position<R: Runtime>(window: tauri::WebviewWindow<R>) -> Result<(i32, i32), String> {
+    let position = window.outer_position().map_err(|error| error.to_string())?;
+    Ok((position.x, position.y))
+}
+
+fn copy_to_clipboard(value: &str) -> Result<(), String> {
+    let mut child = Command::new("pbcopy")
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("Unable to copy prompt: {error}"))?;
+
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin
+            .write_all(value.as_bytes())
+            .map_err(|error| format!("Unable to write prompt to clipboard: {error}"))?;
     }
-}
 
-fn app_exists(app_names: &[&str]) -> bool {
-    let mut roots = vec![PathBuf::from("/Applications"), PathBuf::from("/System/Applications")];
+    let status = child
+        .wait()
+        .map_err(|error| format!("Unable to finish copying prompt: {error}"))?;
 
-    if let Ok(home) = std::env::var("HOME") {
-        roots.push(PathBuf::from(home).join("Applications"));
-    }
-
-    roots
-        .iter()
-        .any(|root| app_names.iter().any(|name| root.join(name).exists()))
-}
-
-fn agent_label(agent: &AgentTarget) -> &'static str {
-    match agent {
-        AgentTarget::Chatgpt => "ChatGPT",
-        AgentTarget::Claude => "Claude",
-        AgentTarget::Gemini => "Gemini",
-        AgentTarget::Cursor => "Cursor",
-        AgentTarget::Codex => "Codex",
-        AgentTarget::Clipboard => "Clipboard",
+    if status.success() {
+        Ok(())
+    } else {
+        Err("Unable to copy prompt to clipboard".to_string())
     }
 }
 
@@ -390,10 +321,140 @@ fn register_shortcut<R: Runtime>(app: &AppHandle<R>, shortcut: Shortcut) -> Resu
 
 fn show_prompt_window<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     let window = app.get_webview_window("main").ok_or_else(|| "Main window missing".to_string())?;
+    position_prompt_window(app, &window)?;
     window.show().map_err(|error| error.to_string())?;
+    window.unminimize().map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())?;
     let _ = window.emit("kyu-focus", ());
     Ok(())
+}
+
+fn position_prompt_window<R: Runtime>(app: &AppHandle<R>, window: &tauri::WebviewWindow<R>) -> Result<(), String> {
+    let window_size = window.outer_size().map_err(|error| error.to_string())?;
+    let monitor = active_monitor(app)?
+        .ok_or_else(|| "No active display found".to_string())?;
+    let monitor_position = monitor.position();
+    let monitor_size = monitor.size();
+
+    let saved_position = app
+        .try_state::<StoreState>()
+        .and_then(|state| state.inner.lock().ok().and_then(|store| store.window_position.clone()));
+
+    let (x, y) = if let Some(position) = saved_position {
+        if position_on_monitor(&position, monitor_position, monitor_size) {
+            let max_x = monitor_position.x + monitor_size.width as i32 - window_size.width as i32;
+            let max_y = monitor_position.y + monitor_size.height as i32 - window_size.height as i32;
+            (position.x.clamp(monitor_position.x, max_x), position.y.clamp(monitor_position.y, max_y))
+        } else {
+            centered_position(monitor_position, monitor_size, window_size)
+        }
+    } else {
+        centered_position(monitor_position, monitor_size, window_size)
+    };
+
+    window
+        .set_position(PhysicalPosition::new(x, y))
+        .map_err(|error| error.to_string())
+}
+
+fn active_monitor<R: Runtime>(app: &AppHandle<R>) -> Result<Option<tauri::Monitor>, String> {
+    if let Some((x, y, width, height)) = frontmost_window_bounds() {
+        let center_x = x + (width / 2);
+        let center_y = y + (height / 2);
+        if let Some(monitor) = app
+            .monitor_from_point(center_x as f64, center_y as f64)
+            .map_err(|error| error.to_string())?
+        {
+            return Ok(Some(monitor));
+        }
+    }
+
+    if let Some(monitor) = app
+        .cursor_position()
+        .ok()
+        .and_then(|cursor| app.monitor_from_point(cursor.x, cursor.y).ok().flatten())
+    {
+        return Ok(Some(monitor));
+    }
+
+    app.primary_monitor().map_err(|error| error.to_string())
+}
+
+fn centered_position(
+    monitor_position: &PhysicalPosition<i32>,
+    monitor_size: &tauri::PhysicalSize<u32>,
+    window_size: tauri::PhysicalSize<u32>,
+) -> (i32, i32) {
+    (
+        monitor_position.x + ((monitor_size.width as i32 - window_size.width as i32) / 2),
+        monitor_position.y + ((monitor_size.height as i32 - window_size.height as i32) / 2),
+    )
+}
+
+fn position_on_monitor(
+    position: &SavedWindowPosition,
+    monitor_position: &PhysicalPosition<i32>,
+    monitor_size: &tauri::PhysicalSize<u32>,
+) -> bool {
+    position.x >= monitor_position.x
+        && position.x < monitor_position.x + monitor_size.width as i32
+        && position.y >= monitor_position.y
+        && position.y < monitor_position.y + monitor_size.height as i32
+}
+
+fn remember_webview_window_position<R: Runtime>(window: &tauri::WebviewWindow<R>, state: &StoreState) {
+    let Ok(position) = window.outer_position() else {
+        return;
+    };
+    remember_position(position, state);
+}
+
+fn remember_window_position<R: Runtime>(window: &tauri::Window<R>, state: &StoreState) {
+    let Ok(position) = window.outer_position() else {
+        return;
+    };
+    remember_position(position, state);
+}
+
+fn remember_position(position: PhysicalPosition<i32>, state: &StoreState) {
+    let mut store = state.inner.lock().expect("store lock poisoned");
+    store.window_position = Some(SavedWindowPosition {
+        x: position.x,
+        y: position.y,
+    });
+    let _ = write_store(state, &store);
+}
+
+fn frontmost_window_bounds() -> Option<(i32, i32, i32, i32)> {
+    let script = r#"
+tell application "System Events"
+  set frontApp to first application process whose frontmost is true
+  if (name of frontApp) is "Kyu" then return ""
+  if (count of windows of frontApp) is 0 then return ""
+  set frontWindow to window 1 of frontApp
+  set windowPosition to position of frontWindow
+  set windowSize to size of frontWindow
+  return ((item 1 of windowPosition) as text) & "," & ((item 2 of windowPosition) as text) & "," & ((item 1 of windowSize) as text) & "," & ((item 2 of windowSize) as text)
+end tell
+"#;
+
+    let output = Command::new("osascript").args(["-e", script]).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let raw = String::from_utf8(output.stdout).ok()?;
+    let values = raw
+        .trim()
+        .split(',')
+        .map(|part| part.trim().parse::<i32>())
+        .collect::<Result<Vec<i32>, _>>()
+        .ok()?;
+
+    match values.as_slice() {
+        [x, y, width, height] if *width > 0 && *height > 0 => Some((*x, *y, *width, *height)),
+        _ => None,
+    }
 }
 
 pub fn run() {
@@ -455,12 +516,28 @@ pub fn run() {
                 }
             }
 
+            if std::env::var("KYU_SHOW_ON_LAUNCH").as_deref() == Ok("1") {
+                let _ = show_prompt_window(app.handle());
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+            match event {
+                WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    if let Some(state) = window.app_handle().try_state::<StoreState>() {
+                        remember_window_position(window, &state);
+                    }
+                    let _ = window.hide();
+                }
+                WindowEvent::Focused(false) => {
+                    if let Some(state) = window.app_handle().try_state::<StoreState>() {
+                        remember_window_position(window, &state);
+                    }
+                    let _ = window.hide();
+                }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -469,10 +546,11 @@ pub fn run() {
             delete_prompt,
             release_prompts,
             set_shortcut,
-            set_agent,
             set_preference,
-            set_session_preference,
-            installed_targets
+            start_native_drag,
+            move_window_to,
+            resize_window_to,
+            window_position
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kyu");
