@@ -1,4 +1,4 @@
-import { FormEvent, PointerEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, KeyboardEvent, PointerEvent, ReactNode, RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -263,8 +263,8 @@ export function App() {
           <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
             <ListPlus className="size-4" aria-hidden="true" />
           </div>
-          <Input
-            ref={inputRef}
+          <HighlightInput
+            inputRef={inputRef}
             aria-label="Prompt"
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
@@ -275,7 +275,6 @@ export function App() {
               }
             }}
             placeholder="Queue a prompt for later..."
-            className="h-14 flex-1 truncate border-0 bg-transparent px-0 text-[1.35rem] leading-none shadow-none placeholder:text-slate-400 focus-visible:ring-0"
           />
           <div className="flex items-center gap-1">
             <Button
@@ -517,6 +516,67 @@ function ReleaseControl({
       {compact ? null : "Release all"}
     </Button>
   );
+}
+
+function HighlightInput({
+  inputRef,
+  value,
+  onChange,
+  onKeyDown,
+  placeholder,
+  "aria-label": ariaLabel,
+}: {
+  inputRef: RefObject<HTMLInputElement | null>;
+  value: string;
+  onChange: (e: ChangeEvent<HTMLInputElement>) => void;
+  onKeyDown: (e: KeyboardEvent<HTMLInputElement>) => void;
+  placeholder: string;
+  "aria-label": string;
+}) {
+  const backdropInnerRef = useRef<HTMLDivElement>(null);
+
+  function syncScroll() {
+    if (!inputRef.current || !backdropInnerRef.current) return;
+    backdropInnerRef.current.style.marginLeft = `-${inputRef.current.scrollLeft}px`;
+  }
+
+  return (
+    <div className="relative flex-1 min-w-0 flex items-center">
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 flex items-center overflow-hidden">
+        <div ref={backdropInnerRef} className="whitespace-pre text-[1.35rem] leading-none">
+          {tokenize(value)}
+        </div>
+      </div>
+      <Input
+        ref={inputRef as RefObject<HTMLInputElement>}
+        aria-label={ariaLabel}
+        value={value}
+        onChange={onChange}
+        onKeyDown={onKeyDown}
+        onScroll={syncScroll}
+        placeholder={placeholder}
+        className="h-14 w-full truncate border-0 bg-transparent px-0 text-[1.35rem] leading-none shadow-none placeholder:text-slate-400 focus-visible:ring-0"
+        style={{ color: "transparent", caretColor: "hsl(225 13% 12%)" }}
+      />
+    </div>
+  );
+}
+
+function tokenize(text: string): ReactNode {
+  const parts: ReactNode[] = [];
+  const re = /(@[\w.-]*|\/[\w/-]*)/g;
+  let last = 0, key = 0, m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(<span key={key++}>{text.slice(last, m.index)}</span>);
+    parts.push(
+      <span key={key++} className={m[0].startsWith("@") ? "text-purple-500" : "text-[hsl(205_88%_46%)]"}>
+        {m[0]}
+      </span>
+    );
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push(<span key={key++}>{text.slice(last)}</span>);
+  return <>{parts}</>;
 }
 
 function PreferenceToggle({
