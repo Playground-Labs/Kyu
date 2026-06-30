@@ -54,12 +54,12 @@ export async function savePrompt(body: string): Promise<QueuedPrompt[]> {
 
   const store = normalizeStore(readFallback());
   store.prompts = [
+    ...store.prompts,
     {
       id: crypto.randomUUID(),
       body,
       createdAt: new Date().toISOString(),
     },
-    ...store.prompts,
   ];
   writeFallback(store);
   return store.prompts;
@@ -79,7 +79,7 @@ export async function releasePrompts(ids: string[]): Promise<string> {
 
   const store = normalizeStore(readFallback());
   const selected = ids.length ? store.prompts.filter((prompt) => ids.includes(prompt.id)) : store.prompts;
-  const bundle = formatPromptBundle(selected);
+  const bundle = ids.length ? (selected[0]?.body.trim() ?? "") : formatPromptBundle(selected);
   store.prompts = store.prompts.filter((prompt) => !selected.some((released) => released.id === prompt.id));
   writeFallback(store);
   await navigator.clipboard.writeText(bundle);
@@ -105,9 +105,14 @@ export async function setPreference(key: "showMenuBar" | "startAtLogin", value: 
 }
 
 export function formatPromptBundle(prompts: QueuedPrompt[]) {
-  return prompts
-    .map((prompt, index) => `Prompt ${index + 1}\n\n${prompt.body.trim()}`)
-    .join("\n\n---\n\n");
+  const items = prompts
+    .map((prompt, index) => `${index + 1}. """\n${prompt.body.trim()}\n"""`)
+    .join("\n\n");
+
+  return [
+    "Exported from Kyu (a prompt queuing app). Execute them in FIFO order.",
+    items,
+  ].join("\n\n");
 }
 
 function normalizeStore(store: LegacyStore): KyuStore {

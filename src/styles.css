@@ -59,6 +59,26 @@
     backdrop-filter: blur(34px) saturate(1.5);
   }
 
+  .prompt-window-shell {
+    transition:
+      opacity 650ms ease,
+      transform 650ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      filter 650ms ease;
+    will-change: opacity, transform, filter;
+  }
+
+  .prompt-window-shell-open {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0) scale(1);
+  }
+
+  .prompt-window-shell-closed {
+    opacity: 0;
+    filter: blur(4px);
+    transform: translateY(-8px) scale(0.965);
+  }
+
   .queue-row {
     @apply rounded-lg border border-transparent px-3 py-2 transition-colors;
   }
@@ -153,6 +173,7 @@
 @media (prefers-reduced-motion: reduce) {
   .release-main-button,
   .status-message,
+  .prompt-window-shell,
   .panel-expander,
   .panel-expander-content {
     animation: none;

@@ -5,9 +5,12 @@ use std::{
     path::PathBuf,
     process::{Command, Stdio},
     sync::{Arc, Mutex},
+    thread,
+    time::{Duration, Instant},
 };
 use tauri::{
     PhysicalPosition,
+    include_image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, Runtime, State, WindowEvent,
@@ -70,6 +73,7 @@ fn default_true() -> bool {
 struct StoreState {
     path: PathBuf,
     inner: Arc<Mutex<Store>>,
+    last_show_at: Arc<Mutex<Instant>>,
 }
 
 fn store_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -98,14 +102,11 @@ fn load_store(state: State<StoreState>) -> Store {
 #[tauri::command]
 fn save_prompt(body: String, state: State<StoreState>) -> Result<Vec<QueuedPrompt>, String> {
     let mut store = state.inner.lock().expect("store lock poisoned");
-    store.prompts.insert(
-        0,
-        QueuedPrompt {
+    store.prompts.push(QueuedPrompt {
             id: Uuid::new_v4().to_string(),
             body,
             created_at: chrono::Utc::now().to_rfc3339(),
-        },
-    );
+        });
     write_store(&state, &store)?;
     Ok(store.prompts.clone())
 }
@@ -120,9 +121,10 @@ fn delete_prompt(id: String, state: State<StoreState>) -> Result<Vec<QueuedPromp
 
 #[tauri::command]
 fn release_prompts(ids: Vec<String>, state: State<StoreState>) -> Result<String, String> {
+    let release_all = ids.is_empty();
     let selected = {
         let store = state.inner.lock().expect("store lock poisoned");
-        if ids.is_empty() {
+        if release_all {
             store.prompts.clone()
         } else {
             store
@@ -134,12 +136,14 @@ fn release_prompts(ids: Vec<String>, state: State<StoreState>) -> Result<String,
         }
     };
 
-    let bundle = selected
-        .iter()
-        .enumerate()
-        .map(|(index, prompt)| format!("Prompt {}\n\n{}", index + 1, prompt.body.trim()))
-        .collect::<Vec<String>>()
-        .join("\n\n---\n\n");
+    let bundle = if release_all {
+        format_prompt_bundle(&selected)
+    } else {
+        selected
+            .first()
+            .map(|prompt| prompt.body.trim().to_string())
+            .unwrap_or_default()
+    };
 
     let selected_ids = selected
         .iter()
@@ -155,6 +159,20 @@ fn release_prompts(ids: Vec<String>, state: State<StoreState>) -> Result<String,
     }
 
     Ok(bundle)
+}
+
+fn format_prompt_bundle(prompts: &[QueuedPrompt]) -> String {
+    let items = prompts
+        .iter()
+        .enumerate()
+        .map(|(index, prompt)| format!("{}. \"\"\"\n{}\n\"\"\"", index + 1, prompt.body.trim()))
+        .collect::<Vec<String>>()
+        .join("\n\n");
+
+    format!(
+        "Exported from Kyu (a prompt queuing app). Execute them in FIFO order.\n\n{}",
+        items
+    )
 }
 
 #[tauri::command]
@@ -321,11 +339,20 @@ fn register_shortcut<R: Runtime>(app: &AppHandle<R>, shortcut: Shortcut) -> Resu
 
 fn show_prompt_window<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     let window = app.get_webview_window("main").ok_or_else(|| "Main window missing".to_string())?;
+    let _ = window.eval("window.dispatchEvent(new Event('kyu-native-blur'))");
     position_prompt_window(app, &window)?;
     window.show().map_err(|error| error.to_string())?;
     window.unminimize().map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())?;
-    let _ = window.emit("kyu-focus", ());
+    if let Some(state) = app.try_state::<StoreState>() {
+        *state.last_show_at.lock().expect("show lock poisoned") = Instant::now();
+    }
+    let focus_window = window.clone();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(140));
+        let _ = focus_window.eval("window.dispatchEvent(new Event('kyu-native-focus'))");
+        let _ = focus_window.app_handle().emit("kyu-focus", ());
+    });
     Ok(())
 }
 
@@ -425,6 +452,20 @@ fn remember_position(position: PhysicalPosition<i32>, state: &StoreState) {
     let _ = write_store(state, &store);
 }
 
+fn fade_then_hide<R: Runtime>(window: &tauri::Window<R>) {
+    let _ = window.app_handle().emit("kyu-blur", ());
+    if let Some(webview) = window.app_handle().get_webview_window("main") {
+        let _ = webview.eval("window.dispatchEvent(new Event('kyu-native-blur'))");
+    }
+    let window = window.clone();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(650));
+        if !window.is_focused().unwrap_or(false) {
+            let _ = window.hide();
+        }
+    });
+}
+
 fn frontmost_window_bounds() -> Option<(i32, i32, i32, i32)> {
     let script = r#"
 tell application "System Events"
@@ -472,6 +513,7 @@ pub fn run() {
             app.manage(StoreState {
                 path,
                 inner: Arc::new(Mutex::new(store)),
+                last_show_at: Arc::new(Mutex::new(Instant::now())),
             });
             register_shortcut(app.handle(), shortcut)?;
 
@@ -480,10 +522,12 @@ pub fn run() {
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &release, &quit])?;
 
-            let mut tray = TrayIconBuilder::with_id("main").menu(&menu).show_menu_on_left_click(false);
-            if let Some(icon) = app.default_window_icon() {
-                tray = tray.icon(icon.clone());
-            }
+            let tray = TrayIconBuilder::with_id("main")
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .icon(include_image!("icons/tray-template.png"))
+                .icon_as_template(true);
+
             tray.on_menu_event(|app, event| match event.id.as_ref() {
                 "show" => {
                     let _ = show_prompt_window(app);
@@ -529,13 +573,19 @@ pub fn run() {
                     if let Some(state) = window.app_handle().try_state::<StoreState>() {
                         remember_window_position(window, &state);
                     }
-                    let _ = window.hide();
+                    fade_then_hide(window);
                 }
                 WindowEvent::Focused(false) => {
                     if let Some(state) = window.app_handle().try_state::<StoreState>() {
+                        let last_show_at = *state.last_show_at.lock().expect("show lock poisoned");
+                        if last_show_at.elapsed() < Duration::from_millis(1200) {
+                            return;
+                        }
+                    }
+                    if let Some(state) = window.app_handle().try_state::<StoreState>() {
                         remember_window_position(window, &state);
                     }
-                    let _ = window.hide();
+                    fade_then_hide(window);
                 }
                 _ => {}
             }

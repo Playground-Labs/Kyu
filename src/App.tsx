@@ -42,6 +42,7 @@ export function App() {
   const [startAtLogin, setStartAtLogin] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [windowVisible, setWindowVisible] = useState(true);
   const [status, setStatus] = useState<StatusMessage | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const shellRef = useRef<HTMLElement | null>(null);
@@ -113,14 +114,30 @@ export function App() {
   useEffect(() => {
     if (!isNative) return;
 
+    const animateOpen = () => {
+      setWindowVisible(false);
+      window.setTimeout(() => {
+        inputRef.current?.focus();
+        setWindowVisible(true);
+      }, 90);
+    };
+    const animateClose = () => setWindowVisible(false);
+    window.addEventListener("focus", animateOpen);
+    window.addEventListener("kyu-native-focus", animateOpen);
+    window.addEventListener("kyu-native-blur", animateClose);
+
     const unlisteners = Promise.all([
-      listen("kyu-focus", () => inputRef.current?.focus()),
+      listen("kyu-focus", animateOpen),
+      listen("kyu-blur", animateClose),
       listen("kyu-release-all", () => {
         void release([]);
       }),
     ]);
 
     return () => {
+      window.removeEventListener("focus", animateOpen);
+      window.removeEventListener("kyu-native-focus", animateOpen);
+      window.removeEventListener("kyu-native-blur", animateClose);
       void unlisteners.then((callbacks) => callbacks.forEach((unlisten) => unlisten()));
     };
   }, [isNative, queue]);
@@ -155,7 +172,7 @@ export function App() {
     const bundle = await releasePrompts(ids);
     await navigator.clipboard.writeText(bundle).catch(() => undefined);
     setQueue((current) => (ids.length ? current.filter((item) => !ids.includes(item.id)) : []));
-    showStatus(`${releasedCount} prompt${releasedCount === 1 ? "" : "s"} copied`);
+    showStatus(`${releasedCount} prompt${releasedCount === 1 ? "" : "s"} released`);
   }
 
   async function remove(id: string) {
@@ -232,7 +249,10 @@ export function App() {
     >
       <section
         ref={shellRef}
-        className="spotlight-shell w-full max-w-3xl overflow-hidden rounded-[28px]"
+        className={cn(
+          "prompt-window-shell spotlight-shell w-full max-w-3xl overflow-hidden rounded-[28px]",
+          windowVisible ? "prompt-window-shell-open" : "prompt-window-shell-closed",
+        )}
         onPointerDown={startWindowDrag}
         onPointerMove={moveWindow}
         onPointerUp={stopWindowDrag}
@@ -483,12 +503,12 @@ function ReleaseControl({
       disabled={disabled}
       variant={compact ? "ghost" : "default"}
       size={compact ? "icon" : "default"}
-      title="Copy to clipboard"
+      title="Release to clipboard"
       className="release-main-button origin-center"
       onClick={onRelease}
     >
       <Clipboard />
-      {compact ? null : "Copy all"}
+      {compact ? null : "Release all"}
     </Button>
   );
 }
