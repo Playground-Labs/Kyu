@@ -52,18 +52,6 @@ cd kyu
 npm install
 ```
 
-### Run The Web Preview
-
-```bash
-npm run dev
-```
-
-Open:
-
-```text
-http://127.0.0.1:1420/
-```
-
 ### Run The Tauri App
 
 ```bash

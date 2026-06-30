@@ -1,4 +1,4 @@
-import { FormEvent, PointerEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, KeyboardEvent, PointerEvent, ReactNode, RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -15,16 +15,17 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import {
   QueuedPrompt,
   deletePrompt,
   loadStore,
   releasePrompts,
+  resumeShortcut,
   savePrompt,
   setPreference,
   setShortcut,
+  suspendShortcut,
 } from "@/lib/prompts";
 
 type StatusMessage = {
@@ -36,8 +37,8 @@ export function App() {
   const isNative = "__TAURI_INTERNALS__" in window;
   const [prompt, setPrompt] = useState("");
   const [queue, setQueue] = useState<QueuedPrompt[]>([]);
-  const [shortcut, setShortcutValue] = useState("CommandOrControl+Space");
-  const [shortcutDraft, setShortcutDraft] = useState("CommandOrControl+Space");
+  const [shortcut, setShortcutValue] = useState("CommandOrControl+Shift+Space");
+  const [shortcutDraft, setShortcutDraft] = useState("CommandOrControl+Shift+Space");
   const [showMenuBar, setShowMenuBar] = useState(true);
   const [startAtLogin, setStartAtLogin] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
@@ -54,6 +55,7 @@ export function App() {
     startWindowY: number;
   } | null>(null);
   const statusTimeoutRef = useRef<number | null>(null);
+  const animateTimerRef = useRef<number | null>(null);
 
   function showStatus(text: string, persistent = false) {
     if (statusTimeoutRef.current) {
@@ -115,14 +117,15 @@ export function App() {
     if (!isNative) return;
 
     const animateOpen = () => {
+      if (animateTimerRef.current !== null) return;
       setWindowVisible(false);
-      window.setTimeout(() => {
+      animateTimerRef.current = window.setTimeout(() => {
+        animateTimerRef.current = null;
         inputRef.current?.focus();
         setWindowVisible(true);
       }, 90);
     };
     const animateClose = () => setWindowVisible(false);
-    window.addEventListener("focus", animateOpen);
     window.addEventListener("kyu-native-focus", animateOpen);
     window.addEventListener("kyu-native-blur", animateClose);
 
@@ -135,7 +138,6 @@ export function App() {
     ]);
 
     return () => {
-      window.removeEventListener("focus", animateOpen);
       window.removeEventListener("kyu-native-focus", animateOpen);
       window.removeEventListener("kyu-native-blur", animateClose);
       void unlisteners.then((callbacks) => callbacks.forEach((unlisten) => unlisten()));
@@ -169,16 +171,17 @@ export function App() {
     const releasedCount = ids.length || queue.length;
     if (!releasedCount) return;
 
-    const bundle = await releasePrompts(ids);
-    await navigator.clipboard.writeText(bundle).catch(() => undefined);
+    await releasePrompts(ids);
     setQueue((current) => (ids.length ? current.filter((item) => !ids.includes(item.id)) : []));
     showStatus(`${releasedCount} prompt${releasedCount === 1 ? "" : "s"} released`);
+    inputRef.current?.focus();
   }
 
   async function remove(id: string) {
     const prompts = await deletePrompt(id);
     setQueue(prompts);
     showStatus("Removed");
+    inputRef.current?.focus();
   }
 
   async function saveShortcut() {
@@ -201,7 +204,7 @@ export function App() {
     if (!isNative || event.button !== 0) return;
 
     const target = event.target as HTMLElement;
-    if (target.closest("button, select, textarea, a, [role='button'], [data-no-window-drag]")) return;
+    if (target.closest("button, input, select, a, [role='button'], [data-no-window-drag]")) return;
 
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -262,8 +265,8 @@ export function App() {
           <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
             <ListPlus className="size-4" aria-hidden="true" />
           </div>
-          <Input
-            ref={inputRef}
+          <HighlightInput
+            inputRef={inputRef}
             aria-label="Prompt"
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
@@ -274,7 +277,6 @@ export function App() {
               }
             }}
             placeholder="Queue a prompt for later..."
-            className="h-14 flex-1 truncate border-0 bg-transparent px-0 text-[1.35rem] leading-none shadow-none placeholder:text-slate-400 focus-visible:ring-0"
           />
           <div className="flex items-center gap-1">
             <Button
@@ -330,10 +332,10 @@ export function App() {
                 <Keyboard className="size-4" />
                 Keyboard shortcut
               </span>
-              <Input value={shortcutDraft} onChange={(event) => setShortcutDraft(event.target.value)} data-no-window-drag />
+              <ShortcutRecorder value={shortcutDraft} onChange={setShortcutDraft} />
             </label>
             <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-              <span>Current shortcut: {shortcut}</span>
+              <span>Current shortcut: {prettyShortcut(shortcut)}</span>
               <Button type="button" size="sm" onClick={saveShortcut}>
                 <Check />
                 Save
@@ -367,14 +369,14 @@ export function App() {
                 onRelease={() => release([])}
               />
             </div>
-            <ScrollArea className="max-h-[380px] px-2 pb-3">
+            <div className="max-h-[380px] overflow-y-auto overscroll-contain px-2 pb-3">
               {queue.length ? (
                 <div className="grid gap-1">
                   {queue.map((item) => (
                     <article key={item.id} className="queue-row grid grid-cols-[1fr_auto] gap-3">
                       <button type="button" className="min-w-0 text-left" onClick={() => setPrompt(item.body)}>
                         <p className="truncate text-sm font-medium">{item.body}</p>
-                        <time className="text-xs text-muted-foreground">{new Date(item.createdAt).toLocaleString()}</time>
+                        <time className="text-xs text-muted-foreground">{formatCreatedAt(item.createdAt)}</time>
                       </button>
                       <div className="flex items-center gap-1">
                         <ReleaseControl
@@ -391,11 +393,16 @@ export function App() {
               ) : (
                 <div className="px-3 py-10 text-center text-sm text-muted-foreground">Saved prompts will appear here.</div>
               )}
-            </ScrollArea>
+            </div>
         </AnimatedPanel>
       </section>
     </main>
   );
+}
+
+function formatCreatedAt(value: string) {
+  const timestamp = /^\d+$/.test(value) ? Number(value) : value;
+  return new Date(timestamp).toLocaleString();
 }
 
 function AnimatedPanel({
@@ -510,6 +517,157 @@ function ReleaseControl({
       <Clipboard />
       {compact ? null : "Release all"}
     </Button>
+  );
+}
+
+function HighlightInput({
+  inputRef,
+  value,
+  onChange,
+  onKeyDown,
+  placeholder,
+  "aria-label": ariaLabel,
+}: {
+  inputRef: RefObject<HTMLInputElement | null>;
+  value: string;
+  onChange: (e: ChangeEvent<HTMLInputElement>) => void;
+  onKeyDown: (e: KeyboardEvent<HTMLInputElement>) => void;
+  placeholder: string;
+  "aria-label": string;
+}) {
+  const backdropInnerRef = useRef<HTMLDivElement>(null);
+
+  function syncScroll() {
+    if (!inputRef.current || !backdropInnerRef.current) return;
+    backdropInnerRef.current.style.marginLeft = `-${inputRef.current.scrollLeft}px`;
+  }
+
+  return (
+    <div className="relative flex-1 min-w-0 flex items-center">
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 flex items-center overflow-hidden">
+        <div ref={backdropInnerRef} className="whitespace-pre text-[1.35rem] leading-none">
+          {tokenize(value)}
+        </div>
+      </div>
+      <Input
+        ref={inputRef as RefObject<HTMLInputElement>}
+        aria-label={ariaLabel}
+        value={value}
+        onChange={onChange}
+        onKeyDown={onKeyDown}
+        onScroll={syncScroll}
+        placeholder={placeholder}
+        className="h-14 w-full truncate border-0 bg-transparent px-0 text-[1.35rem] leading-none shadow-none placeholder:text-slate-400 focus-visible:ring-0"
+        style={{ color: "transparent", caretColor: "hsl(225 13% 12%)" }}
+      />
+    </div>
+  );
+}
+
+function tokenize(text: string): ReactNode {
+  const parts: ReactNode[] = [];
+  const re = /(@[\w.-]*|\/[\w/-]*)/g;
+  let last = 0, key = 0, m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(<span key={key++}>{text.slice(last, m.index)}</span>);
+    parts.push(
+      <span key={key++} className={m[0].startsWith("@") ? "text-purple-500" : "text-[hsl(205_88%_46%)]"}>
+        {m[0]}
+      </span>
+    );
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push(<span key={key++}>{text.slice(last)}</span>);
+  return <>{parts}</>;
+}
+
+function prettyShortcut(value: string): string {
+  return value
+    .replace(/CommandOrControl|Command|Cmd|Mod/gi, "⌘")
+    .replace(/Control|Ctrl/gi, "⌃")
+    .replace(/Option|Alt/gi, "⌥")
+    .replace(/Shift/gi, "⇧")
+    .replace(/\+/g, " ");
+}
+
+const MODIFIER_CODES = [
+  "ShiftLeft", "ShiftRight", "MetaLeft", "MetaRight",
+  "ControlLeft", "ControlRight", "AltLeft", "AltRight",
+];
+
+function ShortcutRecorder({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [recording, setRecording] = useState(false);
+  const [hint, setHint] = useState<string | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+
+  // macOS doesn't focus <button> on click, so we can't rely on the element's
+  // own keydown. Capture on window while recording and drop the global hotkey
+  // so its combo reaches us instead of being swallowed by the OS.
+  useEffect(() => {
+    if (!recording) return;
+    suspendShortcut().catch(() => undefined);
+
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      event.preventDefault();
+      if (event.code === "Escape") {
+        setRecording(false);
+        return;
+      }
+      if (MODIFIER_CODES.includes(event.code)) return; // wait for the non-modifier key
+
+      let mainKey: string | null = null;
+      if (/^Key[A-Z]$/.test(event.code)) mainKey = event.code.slice(3);
+      else if (event.code === "Space") mainKey = "Space";
+      else if (event.code === "Enter") mainKey = "Enter";
+
+      const modifiers: string[] = [];
+      if (event.metaKey) modifiers.push("Cmd");
+      if (event.ctrlKey) modifiers.push("Ctrl");
+      if (event.altKey) modifiers.push("Option");
+      if (event.shiftKey) modifiers.push("Shift");
+
+      if (!mainKey) {
+        setHint("Use a letter, Space, or Enter");
+        return;
+      }
+      if (modifiers.length === 0) {
+        setHint("Add a modifier (⌘ ⌃ ⌥)");
+        return;
+      }
+
+      onChange([...modifiers, mainKey].join("+"));
+      setRecording(false);
+    };
+
+    // Clicking anything other than the recorder cancels (so we never get stuck
+    // swallowing every keystroke).
+    const onPointerDown = (event: globalThis.PointerEvent) => {
+      if (event.target !== buttonRef.current) setRecording(false);
+    };
+
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("pointerdown", onPointerDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("pointerdown", onPointerDown, true);
+      setHint(null);
+      resumeShortcut().catch(() => undefined);
+    };
+  }, [recording, onChange]);
+
+  return (
+    <button
+      ref={buttonRef}
+      type="button"
+      data-no-window-drag
+      onClick={() => setRecording((current) => !current)}
+      className={cn(
+        "flex h-10 w-full items-center rounded-md border bg-background px-3 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        recording ? "border-ring text-muted-foreground" : "border-input",
+      )}
+    >
+      {recording ? (hint ?? "Press shortcut…") : prettyShortcut(value)}
+    </button>
   );
 }
 

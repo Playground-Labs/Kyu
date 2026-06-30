@@ -43,7 +43,6 @@
   }
 
   button,
-  textarea,
   input {
     font: inherit;
   }
@@ -61,9 +60,9 @@
 
   .prompt-window-shell {
     transition:
-      opacity 650ms ease,
-      transform 650ms cubic-bezier(0.2, 0.8, 0.2, 1),
-      filter 650ms ease;
+      opacity 300ms ease,
+      transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      filter 300ms ease;
     will-change: opacity, transform, filter;
   }
 

@@ -6,7 +6,7 @@ use std::{
     process::{Command, Stdio},
     sync::{Arc, Mutex},
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::{
     PhysicalPosition,
@@ -62,7 +62,7 @@ impl Default for Store {
 }
 
 fn default_shortcut() -> String {
-    "CommandOrControl+Space".to_string()
+    "CommandOrControl+Shift+Space".to_string()
 }
 
 fn default_true() -> bool {
@@ -105,7 +105,10 @@ fn save_prompt(body: String, state: State<StoreState>) -> Result<Vec<QueuedPromp
     store.prompts.push(QueuedPrompt {
             id: Uuid::new_v4().to_string(),
             body,
-            created_at: chrono::Utc::now().to_rfc3339(),
+            created_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_millis().to_string())
+                .unwrap_or_default(),
         });
     write_store(&state, &store)?;
     Ok(store.prompts.clone())
@@ -185,6 +188,21 @@ fn set_shortcut<R: Runtime>(shortcut: String, app: AppHandle<R>, state: State<St
     store.shortcut = shortcut.clone();
     write_store(&state, &store)?;
     Ok(shortcut)
+}
+
+// While the recorder is focused, drop the global hotkey so its key combo reaches
+// the webview instead of being consumed by the OS. resume re-arms the saved one.
+#[tauri::command]
+fn suspend_shortcut<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    app.global_shortcut().unregister_all().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn resume_shortcut<R: Runtime>(app: AppHandle<R>, state: State<StoreState>) -> Result<(), String> {
+    let shortcut = state.inner.lock().expect("store lock poisoned").shortcut.clone();
+    let parsed = parse_shortcut(&shortcut)?;
+    app.global_shortcut().unregister_all().map_err(|error| error.to_string())?;
+    register_shortcut(&app, parsed)
 }
 
 #[derive(Debug, Deserialize)]
@@ -369,8 +387,10 @@ fn position_prompt_window<R: Runtime>(app: &AppHandle<R>, window: &tauri::Webvie
 
     let (x, y) = if let Some(position) = saved_position {
         if position_on_monitor(&position, monitor_position, monitor_size) {
-            let max_x = monitor_position.x + monitor_size.width as i32 - window_size.width as i32;
-            let max_y = monitor_position.y + monitor_size.height as i32 - window_size.height as i32;
+            // Floor the upper bound at the lower bound: a window larger than the
+            // monitor would make max < min and panic clamp. ponytail: pins to edge.
+            let max_x = (monitor_position.x + monitor_size.width as i32 - window_size.width as i32).max(monitor_position.x);
+            let max_y = (monitor_position.y + monitor_size.height as i32 - window_size.height as i32).max(monitor_position.y);
             (position.x.clamp(monitor_position.x, max_x), position.y.clamp(monitor_position.y, max_y))
         } else {
             centered_position(monitor_position, monitor_size, window_size)
@@ -459,7 +479,7 @@ fn fade_then_hide<R: Runtime>(window: &tauri::Window<R>) {
     }
     let window = window.clone();
     thread::spawn(move || {
-        thread::sleep(Duration::from_millis(650));
+        thread::sleep(Duration::from_millis(320));
         if !window.is_focused().unwrap_or(false) {
             let _ = window.hide();
         }
@@ -509,7 +529,7 @@ pub fn run() {
             let path = store_path(app.handle())?;
             let mut store = read_store(&path);
             store.start_at_login = app.autolaunch().is_enabled().unwrap_or(store.start_at_login);
-            let shortcut = parse_shortcut(&store.shortcut).unwrap_or_else(|_| Shortcut::new(Some(Modifiers::SUPER), Code::Space));
+            let shortcut = parse_shortcut(&store.shortcut).unwrap_or_else(|_| Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Space));
             app.manage(StoreState {
                 path,
                 inner: Arc::new(Mutex::new(store)),
@@ -596,6 +616,8 @@ pub fn run() {
             delete_prompt,
             release_prompts,
             set_shortcut,
+            suspend_shortcut,
+            resume_shortcut,
             set_preference,
             start_native_drag,
             move_window_to,
