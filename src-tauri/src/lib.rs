@@ -372,8 +372,10 @@ fn position_prompt_window<R: Runtime>(app: &AppHandle<R>, window: &tauri::Webvie
 
     let (x, y) = if let Some(position) = saved_position {
         if position_on_monitor(&position, monitor_position, monitor_size) {
-            let max_x = monitor_position.x + monitor_size.width as i32 - window_size.width as i32;
-            let max_y = monitor_position.y + monitor_size.height as i32 - window_size.height as i32;
+            // Floor the upper bound at the lower bound: a window larger than the
+            // monitor would make max < min and panic clamp. ponytail: pins to edge.
+            let max_x = (monitor_position.x + monitor_size.width as i32 - window_size.width as i32).max(monitor_position.x);
+            let max_y = (monitor_position.y + monitor_size.height as i32 - window_size.height as i32).max(monitor_position.y);
             (position.x.clamp(monitor_position.x, max_x), position.y.clamp(monitor_position.y, max_y))
         } else {
             centered_position(monitor_position, monitor_size, window_size)
