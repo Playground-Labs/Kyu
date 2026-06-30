@@ -62,7 +62,7 @@ impl Default for Store {
 }
 
 fn default_shortcut() -> String {
-    "CommandOrControl+Space".to_string()
+    "CommandOrControl+Shift+Space".to_string()
 }
 
 fn default_true() -> bool {
@@ -188,6 +188,21 @@ fn set_shortcut<R: Runtime>(shortcut: String, app: AppHandle<R>, state: State<St
     store.shortcut = shortcut.clone();
     write_store(&state, &store)?;
     Ok(shortcut)
+}
+
+// While the recorder is focused, drop the global hotkey so its key combo reaches
+// the webview instead of being consumed by the OS. resume re-arms the saved one.
+#[tauri::command]
+fn suspend_shortcut<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    app.global_shortcut().unregister_all().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn resume_shortcut<R: Runtime>(app: AppHandle<R>, state: State<StoreState>) -> Result<(), String> {
+    let shortcut = state.inner.lock().expect("store lock poisoned").shortcut.clone();
+    let parsed = parse_shortcut(&shortcut)?;
+    app.global_shortcut().unregister_all().map_err(|error| error.to_string())?;
+    register_shortcut(&app, parsed)
 }
 
 #[derive(Debug, Deserialize)]
@@ -514,7 +529,7 @@ pub fn run() {
             let path = store_path(app.handle())?;
             let mut store = read_store(&path);
             store.start_at_login = app.autolaunch().is_enabled().unwrap_or(store.start_at_login);
-            let shortcut = parse_shortcut(&store.shortcut).unwrap_or_else(|_| Shortcut::new(Some(Modifiers::SUPER), Code::Space));
+            let shortcut = parse_shortcut(&store.shortcut).unwrap_or_else(|_| Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Space));
             app.manage(StoreState {
                 path,
                 inner: Arc::new(Mutex::new(store)),
@@ -601,6 +616,8 @@ pub fn run() {
             delete_prompt,
             release_prompts,
             set_shortcut,
+            suspend_shortcut,
+            resume_shortcut,
             set_preference,
             start_native_drag,
             move_window_to,

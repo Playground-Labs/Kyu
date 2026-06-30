@@ -21,9 +21,11 @@ import {
   deletePrompt,
   loadStore,
   releasePrompts,
+  resumeShortcut,
   savePrompt,
   setPreference,
   setShortcut,
+  suspendShortcut,
 } from "@/lib/prompts";
 
 type StatusMessage = {
@@ -35,8 +37,8 @@ export function App() {
   const isNative = "__TAURI_INTERNALS__" in window;
   const [prompt, setPrompt] = useState("");
   const [queue, setQueue] = useState<QueuedPrompt[]>([]);
-  const [shortcut, setShortcutValue] = useState("CommandOrControl+Space");
-  const [shortcutDraft, setShortcutDraft] = useState("CommandOrControl+Space");
+  const [shortcut, setShortcutValue] = useState("CommandOrControl+Shift+Space");
+  const [shortcutDraft, setShortcutDraft] = useState("CommandOrControl+Shift+Space");
   const [showMenuBar, setShowMenuBar] = useState(true);
   const [startAtLogin, setStartAtLogin] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
@@ -330,10 +332,10 @@ export function App() {
                 <Keyboard className="size-4" />
                 Keyboard shortcut
               </span>
-              <Input value={shortcutDraft} onChange={(event) => setShortcutDraft(event.target.value)} data-no-window-drag />
+              <ShortcutRecorder value={shortcutDraft} onChange={setShortcutDraft} />
             </label>
             <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-              <span>Current shortcut: {shortcut}</span>
+              <span>Current shortcut: {prettyShortcut(shortcut)}</span>
               <Button type="button" size="sm" onClick={saveShortcut}>
                 <Check />
                 Save
@@ -577,6 +579,96 @@ function tokenize(text: string): ReactNode {
   }
   if (last < text.length) parts.push(<span key={key++}>{text.slice(last)}</span>);
   return <>{parts}</>;
+}
+
+function prettyShortcut(value: string): string {
+  return value
+    .replace(/CommandOrControl|Command|Cmd|Mod/gi, "⌘")
+    .replace(/Control|Ctrl/gi, "⌃")
+    .replace(/Option|Alt/gi, "⌥")
+    .replace(/Shift/gi, "⇧")
+    .replace(/\+/g, " ");
+}
+
+const MODIFIER_CODES = [
+  "ShiftLeft", "ShiftRight", "MetaLeft", "MetaRight",
+  "ControlLeft", "ControlRight", "AltLeft", "AltRight",
+];
+
+function ShortcutRecorder({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [recording, setRecording] = useState(false);
+  const [hint, setHint] = useState<string | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+
+  // macOS doesn't focus <button> on click, so we can't rely on the element's
+  // own keydown. Capture on window while recording and drop the global hotkey
+  // so its combo reaches us instead of being swallowed by the OS.
+  useEffect(() => {
+    if (!recording) return;
+    suspendShortcut().catch(() => undefined);
+
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      event.preventDefault();
+      if (event.code === "Escape") {
+        setRecording(false);
+        return;
+      }
+      if (MODIFIER_CODES.includes(event.code)) return; // wait for the non-modifier key
+
+      let mainKey: string | null = null;
+      if (/^Key[A-Z]$/.test(event.code)) mainKey = event.code.slice(3);
+      else if (event.code === "Space") mainKey = "Space";
+      else if (event.code === "Enter") mainKey = "Enter";
+
+      const modifiers: string[] = [];
+      if (event.metaKey) modifiers.push("Cmd");
+      if (event.ctrlKey) modifiers.push("Ctrl");
+      if (event.altKey) modifiers.push("Option");
+      if (event.shiftKey) modifiers.push("Shift");
+
+      if (!mainKey) {
+        setHint("Use a letter, Space, or Enter");
+        return;
+      }
+      if (modifiers.length === 0) {
+        setHint("Add a modifier (⌘ ⌃ ⌥)");
+        return;
+      }
+
+      onChange([...modifiers, mainKey].join("+"));
+      setRecording(false);
+    };
+
+    // Clicking anything other than the recorder cancels (so we never get stuck
+    // swallowing every keystroke).
+    const onPointerDown = (event: globalThis.PointerEvent) => {
+      if (event.target !== buttonRef.current) setRecording(false);
+    };
+
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("pointerdown", onPointerDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("pointerdown", onPointerDown, true);
+      setHint(null);
+      resumeShortcut().catch(() => undefined);
+    };
+  }, [recording, onChange]);
+
+  return (
+    <button
+      ref={buttonRef}
+      type="button"
+      data-no-window-drag
+      onClick={() => setRecording((current) => !current)}
+      className={cn(
+        "flex h-10 w-full items-center rounded-md border bg-background px-3 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        recording ? "border-ring text-muted-foreground" : "border-input",
+      )}
+    >
+      {recording ? (hint ?? "Press shortcut…") : prettyShortcut(value)}
+    </button>
+  );
 }
 
 function PreferenceToggle({

@@ -34,6 +34,14 @@ export async function setShortcut(shortcut: string): Promise<string> {
   return invoke<string>("set_shortcut", { shortcut });
 }
 
+export async function suspendShortcut(): Promise<void> {
+  return invoke("suspend_shortcut");
+}
+
+export async function resumeShortcut(): Promise<void> {
+  return invoke("resume_shortcut");
+}
+
 export async function setPreference(key: "showMenuBar" | "startAtLogin", value: boolean): Promise<KyuStore> {
   return invoke<KyuStore>("set_preference", { key, value });
 }
