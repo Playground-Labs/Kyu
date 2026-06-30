@@ -53,6 +53,7 @@ export function App() {
     startWindowY: number;
   } | null>(null);
   const statusTimeoutRef = useRef<number | null>(null);
+  const animateTimerRef = useRef<number | null>(null);
 
   function showStatus(text: string, persistent = false) {
     if (statusTimeoutRef.current) {
@@ -114,14 +115,15 @@ export function App() {
     if (!isNative) return;
 
     const animateOpen = () => {
+      if (animateTimerRef.current !== null) return;
       setWindowVisible(false);
-      window.setTimeout(() => {
+      animateTimerRef.current = window.setTimeout(() => {
+        animateTimerRef.current = null;
         inputRef.current?.focus();
         setWindowVisible(true);
       }, 90);
     };
     const animateClose = () => setWindowVisible(false);
-    window.addEventListener("focus", animateOpen);
     window.addEventListener("kyu-native-focus", animateOpen);
     window.addEventListener("kyu-native-blur", animateClose);
 
@@ -134,7 +136,6 @@ export function App() {
     ]);
 
     return () => {
-      window.removeEventListener("focus", animateOpen);
       window.removeEventListener("kyu-native-focus", animateOpen);
       window.removeEventListener("kyu-native-blur", animateClose);
       void unlisteners.then((callbacks) => callbacks.forEach((unlisten) => unlisten()));
