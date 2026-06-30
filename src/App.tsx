@@ -15,7 +15,6 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import {
   QueuedPrompt,
@@ -367,7 +366,7 @@ export function App() {
                 onRelease={() => release([])}
               />
             </div>
-            <ScrollArea className="max-h-[380px] px-2 pb-3">
+            <div className="max-h-[380px] overflow-y-auto overscroll-contain px-2 pb-3">
               {queue.length ? (
                 <div className="grid gap-1">
                   {queue.map((item) => (
@@ -391,7 +390,7 @@ export function App() {
               ) : (
                 <div className="px-3 py-10 text-center text-sm text-muted-foreground">Saved prompts will appear here.</div>
               )}
-            </ScrollArea>
+            </div>
         </AnimatedPanel>
       </section>
     </main>
