@@ -171,12 +171,14 @@ export function App() {
     await releasePrompts(ids);
     setQueue((current) => (ids.length ? current.filter((item) => !ids.includes(item.id)) : []));
     showStatus(`${releasedCount} prompt${releasedCount === 1 ? "" : "s"} released`);
+    inputRef.current?.focus();
   }
 
   async function remove(id: string) {
     const prompts = await deletePrompt(id);
     setQueue(prompts);
     showStatus("Removed");
+    inputRef.current?.focus();
   }
 
   async function saveShortcut() {
@@ -199,7 +201,7 @@ export function App() {
     if (!isNative || event.button !== 0) return;
 
     const target = event.target as HTMLElement;
-    if (target.closest("button, select, textarea, a, [role='button'], [data-no-window-drag]")) return;
+    if (target.closest("button, input, select, a, [role='button'], [data-no-window-drag]")) return;
 
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
