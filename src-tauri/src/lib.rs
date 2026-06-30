@@ -479,7 +479,7 @@ fn fade_then_hide<R: Runtime>(window: &tauri::Window<R>) {
     }
     let window = window.clone();
     thread::spawn(move || {
-        thread::sleep(Duration::from_millis(650));
+        thread::sleep(Duration::from_millis(320));
         if !window.is_focused().unwrap_or(false) {
             let _ = window.hide();
         }
