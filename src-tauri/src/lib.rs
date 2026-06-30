@@ -6,7 +6,7 @@ use std::{
     process::{Command, Stdio},
     sync::{Arc, Mutex},
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::{
     PhysicalPosition,
@@ -105,7 +105,10 @@ fn save_prompt(body: String, state: State<StoreState>) -> Result<Vec<QueuedPromp
     store.prompts.push(QueuedPrompt {
             id: Uuid::new_v4().to_string(),
             body,
-            created_at: chrono::Utc::now().to_rfc3339(),
+            created_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_millis().to_string())
+                .unwrap_or_default(),
         });
     write_store(&state, &store)?;
     Ok(store.prompts.clone())

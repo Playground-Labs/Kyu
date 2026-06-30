@@ -168,8 +168,7 @@ export function App() {
     const releasedCount = ids.length || queue.length;
     if (!releasedCount) return;
 
-    const bundle = await releasePrompts(ids);
-    await navigator.clipboard.writeText(bundle).catch(() => undefined);
+    await releasePrompts(ids);
     setQueue((current) => (ids.length ? current.filter((item) => !ids.includes(item.id)) : []));
     showStatus(`${releasedCount} prompt${releasedCount === 1 ? "" : "s"} released`);
   }
@@ -373,7 +372,7 @@ export function App() {
                     <article key={item.id} className="queue-row grid grid-cols-[1fr_auto] gap-3">
                       <button type="button" className="min-w-0 text-left" onClick={() => setPrompt(item.body)}>
                         <p className="truncate text-sm font-medium">{item.body}</p>
-                        <time className="text-xs text-muted-foreground">{new Date(item.createdAt).toLocaleString()}</time>
+                        <time className="text-xs text-muted-foreground">{formatCreatedAt(item.createdAt)}</time>
                       </button>
                       <div className="flex items-center gap-1">
                         <ReleaseControl
@@ -395,6 +394,11 @@ export function App() {
       </section>
     </main>
   );
+}
+
+function formatCreatedAt(value: string) {
+  const timestamp = /^\d+$/.test(value) ? Number(value) : value;
+  return new Date(timestamp).toLocaleString();
 }
 
 function AnimatedPanel({
