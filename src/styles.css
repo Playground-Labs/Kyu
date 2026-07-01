@@ -22,6 +22,24 @@
     --radius: 0.75rem;
   }
 
+  .dark {
+    --background: 222 14% 11%;
+    --foreground: 220 15% 92%;
+    --muted: 220 12% 20%;
+    --muted-foreground: 220 9% 62%;
+    --accent: 205 85% 52%;
+    --accent-foreground: 0 0% 100%;
+    --primary: 220 15% 92%;
+    --primary-foreground: 224 16% 12%;
+    --secondary: 220 10% 24%;
+    --secondary-foreground: 220 15% 92%;
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 10% 26%;
+    --input: 220 10% 26%;
+    --ring: 205 85% 55%;
+  }
+
   * {
     @apply border-border;
   }
@@ -58,6 +76,14 @@
     backdrop-filter: blur(34px) saturate(1.5);
   }
 
+  .dark .spotlight-shell {
+    background:
+      linear-gradient(180deg, rgba(42, 45, 52, 0.82), rgba(26, 28, 33, 0.78)),
+      rgba(18, 20, 24, 0.62);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+
   .prompt-window-shell {
     transition:
       opacity 300ms ease,
@@ -84,6 +110,10 @@
 
   .queue-row:hover {
     @apply border-border bg-white/60;
+  }
+
+  .dark .queue-row:hover {
+    @apply bg-white/5;
   }
 
   .panel-expander {

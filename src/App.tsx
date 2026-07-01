@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import {
   QueuedPrompt,
+  ThemePref,
   deletePrompt,
   loadStore,
   releasePrompts,
@@ -25,6 +26,7 @@ import {
   savePrompt,
   setPreference,
   setShortcut,
+  setTheme,
   suspendShortcut,
 } from "@/lib/prompts";
 import { tokenizeParts } from "@/lib/highlight";
@@ -44,6 +46,7 @@ export function App() {
   const [shortcutDraft, setShortcutDraft] = useState("CommandOrControl+Shift+Space");
   const [showMenuBar, setShowMenuBar] = useState(true);
   const [startAtLogin, setStartAtLogin] = useState(false);
+  const [theme, setThemeValue] = useState<ThemePref>("system");
   const [showQueue, setShowQueue] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   // Native window is created hidden and fades in via kyu-focus; start closed so
@@ -91,8 +94,22 @@ export function App() {
       setShortcutDraft(store.shortcut);
       setShowMenuBar(store.showMenuBar);
       setStartAtLogin(store.startAtLogin);
+      setThemeValue(store.theme);
     });
   }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      const dark = theme === "dark" || (theme === "system" && media.matches);
+      root.classList.toggle("dark", dark);
+    };
+    apply();
+    if (theme !== "system") return;
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, [theme]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -209,6 +226,11 @@ export function App() {
     showStatus(key === "showMenuBar" ? "Menu bar saved" : "Login saved");
   }
 
+  async function updateTheme(next: ThemePref) {
+    const store = await setTheme(next);
+    setThemeValue(store.theme);
+  }
+
   async function startWindowDrag(event: PointerEvent<HTMLElement>) {
     if (!isNative || event.button !== 0) return;
 
@@ -256,7 +278,8 @@ export function App() {
     <main
       className={cn(
         "flex min-h-[100dvh] items-start justify-center",
-        !isNative && "bg-[linear-gradient(135deg,#e7ebf0_0%,#f8fafc_42%,#dde4ec_100%)]",
+        !isNative &&
+          "bg-[linear-gradient(135deg,#e7ebf0_0%,#f8fafc_42%,#dde4ec_100%)] dark:bg-[linear-gradient(135deg,#181a1f_0%,#101216_42%,#0b0c0f_100%)]",
       )}
     >
       <section
@@ -326,14 +349,14 @@ export function App() {
           </div>
         </form>
 
-        <div className="flex items-center justify-between border-t border-white/70 bg-white/38 px-5 py-2 text-xs text-muted-foreground">
+        <div className="flex items-center justify-between border-t border-white/70 bg-white/38 px-5 py-2 text-xs text-muted-foreground dark:border-white/10 dark:bg-white/5">
           <span>{queueSummary}</span>
           <AnimatedStatus status={status} />
         </div>
 
         <AnimatedPanel
           open={showSettings}
-          className="border-t border-slate-300/70 bg-white/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.72)]"
+          className="border-t border-slate-300/70 bg-white/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] dark:border-white/10 dark:bg-white/[0.04] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
           contentClassName="px-5 py-4"
         >
             <label className="grid gap-2 text-sm font-medium">
@@ -351,6 +374,7 @@ export function App() {
               </Button>
             </div>
             <div className="mt-4 grid gap-2 border-t border-border/70 pt-3">
+              <ThemeControl value={theme} onChange={updateTheme} />
               <PreferenceToggle
                 label="Show in menu bar"
                 checked={showMenuBar}
@@ -366,7 +390,7 @@ export function App() {
 
         <AnimatedPanel
           open={showQueue}
-          className="border-t border-slate-300/70 bg-white/46 shadow-[inset_0_1px_0_rgba(255,255,255,0.72)]"
+          className="border-t border-slate-300/70 bg-white/46 shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] dark:border-white/10 dark:bg-white/[0.03] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
         >
             <div className="flex items-center justify-between gap-4 px-5 py-3">
               <div>
@@ -563,8 +587,8 @@ function HighlightInput({
         onKeyDown={onKeyDown}
         onScroll={syncScroll}
         placeholder={placeholder}
-        className="h-14 w-full truncate border-0 bg-transparent px-0 text-[1.35rem] leading-none shadow-none placeholder:text-slate-400 focus-visible:ring-0"
-        style={{ color: "transparent", caretColor: "hsl(225 13% 12%)" }}
+        className="h-14 w-full truncate border-0 bg-transparent px-0 text-[1.35rem] leading-none shadow-none placeholder:text-slate-400 focus-visible:ring-0 dark:placeholder:text-slate-500"
+        style={{ color: "transparent", caretColor: "hsl(var(--foreground))" }}
       />
     </div>
   );
@@ -636,6 +660,35 @@ function ShortcutRecorder({ value, onChange }: { value: string; onChange: (v: st
   );
 }
 
+function ThemeControl({ value, onChange }: { value: ThemePref; onChange: (theme: ThemePref) => void }) {
+  const options: [ThemePref, string][] = [
+    ["system", "Auto"],
+    ["light", "Light"],
+    ["dark", "Dark"],
+  ];
+
+  return (
+    <div className="flex h-10 items-center justify-between px-2 text-sm font-medium">
+      <span>Appearance</span>
+      <div className="flex gap-0.5 rounded-lg border border-border/70 p-0.5">
+        {options.map(([option, label]) => (
+          <button
+            key={option}
+            type="button"
+            onClick={() => onChange(option)}
+            className={cn(
+              "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+              value === option ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function PreferenceToggle({
   label,
   checked,
@@ -650,7 +703,7 @@ function PreferenceToggle({
   return (
     <button
       type="button"
-      className="flex h-10 items-center justify-between rounded-lg px-2 text-sm font-medium transition-colors hover:bg-white/65"
+      className="flex h-10 items-center justify-between rounded-lg px-2 text-sm font-medium transition-colors hover:bg-white/65 dark:hover:bg-white/10"
       onClick={() => onChange(!checked)}
     >
       <span>{label}</span>

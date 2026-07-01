@@ -38,6 +38,8 @@ struct Store {
     show_menu_bar: bool,
     #[serde(default)]
     start_at_login: bool,
+    #[serde(default = "default_theme")]
+    theme: String,
     #[serde(default)]
     window_position: Option<SavedWindowPosition>,
 }
@@ -56,6 +58,7 @@ impl Default for Store {
             shortcut: default_shortcut(),
             show_menu_bar: true,
             start_at_login: false,
+            theme: default_theme(),
             window_position: None,
         }
     }
@@ -63,6 +66,10 @@ impl Default for Store {
 
 fn default_shortcut() -> String {
     "CommandOrControl+Shift+Space".to_string()
+}
+
+fn default_theme() -> String {
+    "system".to_string()
 }
 
 fn default_true() -> bool {
@@ -238,6 +245,17 @@ fn set_preference<R: Runtime>(
         }
     }
 
+    write_store(&state, &store)?;
+    Ok(store.clone())
+}
+
+#[tauri::command]
+fn set_theme(theme: String, state: State<StoreState>) -> Result<Store, String> {
+    if !matches!(theme.as_str(), "system" | "light" | "dark") {
+        return Err(format!("Unknown theme: {theme}"));
+    }
+    let mut store = state.inner.lock().expect("store lock poisoned");
+    store.theme = theme;
     write_store(&state, &store)?;
     Ok(store.clone())
 }
@@ -630,6 +648,7 @@ pub fn run() {
             suspend_shortcut,
             resume_shortcut,
             set_preference,
+            set_theme,
             start_native_drag,
             move_window_to,
             resize_window_to,
