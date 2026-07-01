@@ -45,3 +45,15 @@ installs without the Gatekeeper warning. Until then, builds still succeed
 
    The in-repo `packaging/homebrew/kyu.rb` is an informational mirror only; the
    tap is the source of truth users install from.
+
+### Renewing the tap token
+
+`HOMEBREW_TAP_TOKEN` is a fine-grained PAT and **expires**. When it does, the
+`update-homebrew-cask` job starts failing with a 403/auth error while the
+release still publishes — so a release can look green-ish yet leave the cask
+stale. To renew: regenerate the PAT (GitHub → Settings → Developer settings →
+Fine-grained tokens), keeping resource owner `Playground-Labs`, repo access
+limited to `homebrew-kyu`, and **Contents: Read and write**; then update the
+secret with `gh secret set HOMEBREW_TAP_TOKEN --repo Playground-Labs/Kyu`.
+If the token is owned via the org, it may need org-owner approval before it
+works.
