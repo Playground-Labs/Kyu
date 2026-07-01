@@ -40,6 +40,17 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # Gate the release on the test suites before anything is built or uploaded.
+      - name: Frontend tests
+        run: npm test
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --no-default-features
+
       - name: Build and upload Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
