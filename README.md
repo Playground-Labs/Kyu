@@ -19,20 +19,22 @@ Kyu is currently an early prototype.
 
 ## Install
 
-Download the latest DMG from the [Releases page](https://github.com/Playground-Labs/Kyu/releases/latest):
+### Homebrew
+
+```bash
+brew install --cask playground-labs/kyu/kyu
+```
+
+The cask lives in the [`playground-labs/kyu`](https://github.com/Playground-Labs/homebrew-kyu) tap (source: [`packaging/homebrew/kyu.rb`](packaging/homebrew/kyu.rb)).
+
+### Direct download
+
+Alternatively, grab the latest DMG from the [Releases page](https://github.com/Playground-Labs/Kyu/releases/latest):
 
 - **Apple Silicon** (M1/M2/M3/M4): `Kyu_<version>_aarch64.dmg`
 - **Intel**: `Kyu_<version>_x64.dmg`
 
 Open the DMG and drag **Kyu** into Applications. The first time you launch it, macOS may block it because it is distributed outside the App Store — right-click Kyu and choose **Open**, or approve it under System Settings → Privacy & Security.
-
-### Homebrew
-
-> Planned — not yet available. Once the `playground-labs/kyu` tap is published (cask drafted at [`packaging/homebrew/kyu.rb`](packaging/homebrew/kyu.rb)), install with:
-
-```bash
-brew install --cask playground-labs/kyu/kyu
-```
 
 ## Install From Source
 
