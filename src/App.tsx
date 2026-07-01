@@ -46,7 +46,9 @@ export function App() {
   const [startAtLogin, setStartAtLogin] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [windowVisible, setWindowVisible] = useState(true);
+  // Native window is created hidden and fades in via kyu-focus; start closed so
+  // the first show() never paints an opaque frame before the blur lands (flicker).
+  const [windowVisible, setWindowVisible] = useState(!isNative);
   const [status, setStatus] = useState<StatusMessage | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const shellRef = useRef<HTMLElement | null>(null);
@@ -102,10 +104,12 @@ export function App() {
     const shell = shellRef.current;
 
     const resizeToShell = () => {
-      const rect = shell.getBoundingClientRect();
+      // offset* is the layout box and ignores the entrance transform (scale);
+      // getBoundingClientRect returns the scaled box, which feeds back through
+      // ResizeObserver + w-full and spirals the window down to a sliver.
       void invoke("resize_window_to", {
-        width: Math.ceil(rect.width),
-        height: Math.ceil(rect.height),
+        width: shell.offsetWidth,
+        height: shell.offsetHeight,
       }).catch(() => undefined);
     };
 
@@ -121,7 +125,9 @@ export function App() {
 
     const animateOpen = () => {
       if (animateTimerRef.current !== null) return;
-      setWindowVisible(false);
+      // Content rests closed whenever the window is hidden, so a single flip to
+      // visible triggers the entrance fade. Toggling it off-then-on here would
+      // blink an already-painted frame out and back in.
       animateTimerRef.current = window.setTimeout(() => {
         animateTimerRef.current = null;
         inputRef.current?.focus();

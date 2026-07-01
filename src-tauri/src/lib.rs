@@ -357,7 +357,8 @@ fn register_shortcut<R: Runtime>(app: &AppHandle<R>, shortcut: Shortcut) -> Resu
 
 fn show_prompt_window<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     let window = app.get_webview_window("main").ok_or_else(|| "Main window missing".to_string())?;
-    let _ = window.eval("window.dispatchEvent(new Event('kyu-native-blur'))");
+    // The webview already rests in the closed state while hidden; don't force a
+    // blur here — the eval lands after show() and blinks content off-screen.
     position_prompt_window(app, &window)?;
     window.show().map_err(|error| error.to_string())?;
     window.unminimize().map_err(|error| error.to_string())?;
