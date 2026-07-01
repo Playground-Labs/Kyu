@@ -6,11 +6,14 @@ export type QueuedPrompt = {
   createdAt: string;
 };
 
+export type ThemePref = "system" | "light" | "dark";
+
 type KyuStore = {
   prompts: QueuedPrompt[];
   shortcut: string;
   showMenuBar: boolean;
   startAtLogin: boolean;
+  theme: ThemePref;
   windowPosition: { x: number; y: number } | null;
 };
 
@@ -44,4 +47,8 @@ export async function resumeShortcut(): Promise<void> {
 
 export async function setPreference(key: "showMenuBar" | "startAtLogin", value: boolean): Promise<KyuStore> {
   return invoke<KyuStore>("set_preference", { key, value });
+}
+
+export async function setTheme(theme: ThemePref): Promise<KyuStore> {
+  return invoke<KyuStore>("set_theme", { theme });
 }
