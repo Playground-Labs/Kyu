@@ -69,3 +69,51 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }}
+
+  # Once both DMGs are on the release, bump the Homebrew tap to match. Needs a
+  # token that can write to the tap repo (GITHUB_TOKEN only covers this repo):
+  # a fine-grained PAT with Contents:Read/Write on Playground-Labs/homebrew-kyu,
+  # stored as the HOMEBREW_TAP_TOKEN secret. If it's unset this job fails while
+  # the release itself stays published.
+  update-homebrew-cask:
+    needs: build-macos
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the Homebrew tap
+        uses: actions/checkout@v5
+        with:
+          repository: Playground-Labs/homebrew-kyu
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Bump the cask to the released version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP" \
+            --pattern "Kyu_${version}_aarch64.dmg" \
+            --pattern "Kyu_${version}_x64.dmg"
+
+          export version
+          export arm_sha=$(sha256sum "$RUNNER_TEMP/Kyu_${version}_aarch64.dmg" | cut -d' ' -f1)
+          export intel_sha=$(sha256sum "$RUNNER_TEMP/Kyu_${version}_x64.dmg" | cut -d' ' -f1)
+
+          # 64-hex anchors keep the sha lines off the `arch ... intel: "x64"` line.
+          perl -0777 -pi -e '
+            s/^(  version )"[^"]*"/$1"$ENV{version}"/m;
+            s/(sha256 arm:\s*)"[0-9a-f]{64}"/$1"$ENV{arm_sha}"/;
+            s/(intel:\s*)"[0-9a-f]{64}"/$1"$ENV{intel_sha}"/;
+          ' Casks/kyu.rb
+
+          if git diff --quiet; then
+            echo "Cask already at ${version}; nothing to do."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "kyu ${version}"
+          git push

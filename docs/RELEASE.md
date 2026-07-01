@@ -35,6 +35,25 @@ installs without the Gatekeeper warning. Until then, builds still succeed
 1. Bump the version in `package.json`, `src-tauri/tauri.conf.json`,
    `src-tauri/Cargo.toml` (and refresh `Cargo.lock`).
 2. Commit, then tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`.
-3. After the release publishes, update the Homebrew cask
-   (`packaging/homebrew/kyu.rb` and the tap's `Casks/kyu.rb`) — bump `version`
-   and both `sha256` values (see `packaging/homebrew/README.md`).
+3. The Homebrew cask updates itself. Once both DMGs are on the release, the
+   `update-homebrew-cask` job computes their `sha256` values and commits the
+   version + hash bump to the tap's `Casks/kyu.rb` (repo
+   `Playground-Labs/homebrew-kyu`). This needs a `HOMEBREW_TAP_TOKEN` secret —
+   a fine-grained PAT with **Contents: Read and write** on the tap repo —
+   since the built-in `GITHUB_TOKEN` can't push to another repo. If the secret
+   is missing the job fails, but the release itself stays published.
+
+   The in-repo `packaging/homebrew/kyu.rb` is an informational mirror only; the
+   tap is the source of truth users install from.
+
+### Renewing the tap token
+
+`HOMEBREW_TAP_TOKEN` is a fine-grained PAT and **expires**. When it does, the
+`update-homebrew-cask` job starts failing with a 403/auth error while the
+release still publishes — so a release can look green-ish yet leave the cask
+stale. To renew: regenerate the PAT (GitHub → Settings → Developer settings →
+Fine-grained tokens), keeping resource owner `Playground-Labs`, repo access
+limited to `homebrew-kyu`, and **Contents: Read and write**; then update the
+secret with `gh secret set HOMEBREW_TAP_TOKEN --repo Playground-Labs/Kyu`.
+If the token is owned via the org, it may need org-owner approval before it
+works.
