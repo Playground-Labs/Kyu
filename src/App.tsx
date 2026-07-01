@@ -27,6 +27,9 @@ import {
   setShortcut,
   suspendShortcut,
 } from "@/lib/prompts";
+import { tokenizeParts } from "@/lib/highlight";
+import { formatCreatedAt, prettyShortcut } from "@/lib/format";
+import { shortcutFromKey } from "@/lib/shortcut";
 
 type StatusMessage = {
   id: number;
@@ -400,11 +403,6 @@ export function App() {
   );
 }
 
-function formatCreatedAt(value: string) {
-  const timestamp = /^\d+$/.test(value) ? Number(value) : value;
-  return new Date(timestamp).toLocaleString();
-}
-
 function AnimatedPanel({
   open,
   children,
@@ -546,7 +544,9 @@ function HighlightInput({
     <div className="relative flex-1 min-w-0 flex items-center">
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 flex items-center overflow-hidden">
         <div ref={backdropInnerRef} className="whitespace-pre text-[1.35rem] leading-none">
-          {tokenize(value)}
+          {tokenizeParts(value).map((part, i) => (
+            <span key={i} className={TOKEN_CLASS[part.kind]}>{part.text}</span>
+          ))}
         </div>
       </div>
       <Input
@@ -564,36 +564,11 @@ function HighlightInput({
   );
 }
 
-function tokenize(text: string): ReactNode {
-  const parts: ReactNode[] = [];
-  const re = /(@[\w.-]*|\/[\w/-]*)/g;
-  let last = 0, key = 0, m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) parts.push(<span key={key++}>{text.slice(last, m.index)}</span>);
-    parts.push(
-      <span key={key++} className={m[0].startsWith("@") ? "text-purple-500" : "text-[hsl(205_88%_46%)]"}>
-        {m[0]}
-      </span>
-    );
-    last = m.index + m[0].length;
-  }
-  if (last < text.length) parts.push(<span key={key++}>{text.slice(last)}</span>);
-  return <>{parts}</>;
-}
-
-function prettyShortcut(value: string): string {
-  return value
-    .replace(/CommandOrControl|Command|Cmd|Mod/gi, "⌘")
-    .replace(/Control|Ctrl/gi, "⌃")
-    .replace(/Option|Alt/gi, "⌥")
-    .replace(/Shift/gi, "⇧")
-    .replace(/\+/g, " ");
-}
-
-const MODIFIER_CODES = [
-  "ShiftLeft", "ShiftRight", "MetaLeft", "MetaRight",
-  "ControlLeft", "ControlRight", "AltLeft", "AltRight",
-];
+const TOKEN_CLASS: Record<string, string> = {
+  plain: "",
+  skill: "text-[hsl(205_88%_46%)]",
+  context: "text-purple-500",
+};
 
 function ShortcutRecorder({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [recording, setRecording] = useState(false);
@@ -613,29 +588,13 @@ function ShortcutRecorder({ value, onChange }: { value: string; onChange: (v: st
         setRecording(false);
         return;
       }
-      if (MODIFIER_CODES.includes(event.code)) return; // wait for the non-modifier key
-
-      let mainKey: string | null = null;
-      if (/^Key[A-Z]$/.test(event.code)) mainKey = event.code.slice(3);
-      else if (event.code === "Space") mainKey = "Space";
-      else if (event.code === "Enter") mainKey = "Enter";
-
-      const modifiers: string[] = [];
-      if (event.metaKey) modifiers.push("Cmd");
-      if (event.ctrlKey) modifiers.push("Ctrl");
-      if (event.altKey) modifiers.push("Option");
-      if (event.shiftKey) modifiers.push("Shift");
-
-      if (!mainKey) {
-        setHint("Use a letter, Space, or Enter");
+      const result = shortcutFromKey(event);
+      if (result === null) return;        // lone modifier; wait for the real key
+      if ("hint" in result) {
+        setHint(result.hint);
         return;
       }
-      if (modifiers.length === 0) {
-        setHint("Add a modifier (⌘ ⌃ ⌥)");
-        return;
-      }
-
-      onChange([...modifiers, mainKey].join("+"));
+      onChange(result.combo);
       setRecording(false);
     };
 
