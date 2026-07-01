@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Frontend tests
+        run: npm test
+
+      # Also type-checks and produces dist/, which the Rust crate needs to
+      # compile tauri::generate_context! for `cargo test`.
+      - name: Build frontend
+        run: npm run build
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --no-default-features
