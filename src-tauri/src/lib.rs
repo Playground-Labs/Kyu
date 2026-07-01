@@ -387,11 +387,7 @@ fn position_prompt_window<R: Runtime>(app: &AppHandle<R>, window: &tauri::Webvie
 
     let (x, y) = if let Some(position) = saved_position {
         if position_on_monitor(&position, monitor_position, monitor_size) {
-            // Floor the upper bound at the lower bound: a window larger than the
-            // monitor would make max < min and panic clamp. ponytail: pins to edge.
-            let max_x = (monitor_position.x + monitor_size.width as i32 - window_size.width as i32).max(monitor_position.x);
-            let max_y = (monitor_position.y + monitor_size.height as i32 - window_size.height as i32).max(monitor_position.y);
-            (position.x.clamp(monitor_position.x, max_x), position.y.clamp(monitor_position.y, max_y))
+            clamp_to_monitor(&position, monitor_position, monitor_size, window_size)
         } else {
             centered_position(monitor_position, monitor_size, window_size)
         }
@@ -425,6 +421,20 @@ fn active_monitor<R: Runtime>(app: &AppHandle<R>) -> Result<Option<tauri::Monito
     }
 
     app.primary_monitor().map_err(|error| error.to_string())
+}
+
+// Clamp a saved position into the monitor. The upper bound is floored at the
+// lower bound: a window larger than the monitor would make max < min and panic
+// clamp(), so instead it pins to the monitor's origin edge. ponytail: pins to edge.
+fn clamp_to_monitor(
+    position: &SavedWindowPosition,
+    monitor_position: &PhysicalPosition<i32>,
+    monitor_size: &tauri::PhysicalSize<u32>,
+    window_size: tauri::PhysicalSize<u32>,
+) -> (i32, i32) {
+    let max_x = (monitor_position.x + monitor_size.width as i32 - window_size.width as i32).max(monitor_position.x);
+    let max_y = (monitor_position.y + monitor_size.height as i32 - window_size.height as i32).max(monitor_position.y);
+    (position.x.clamp(monitor_position.x, max_x), position.y.clamp(monitor_position.y, max_y))
 }
 
 fn centered_position(
@@ -626,4 +636,98 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kyu");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tauri::{PhysicalPosition, PhysicalSize};
+
+    fn dbg_shortcut(s: &str) -> String {
+        format!("{:?}", parse_shortcut(s).expect("should parse"))
+    }
+
+    #[test]
+    fn parse_shortcut_accepts_the_default() {
+        assert!(parse_shortcut("CommandOrControl+Shift+Space").is_ok());
+    }
+
+    #[test]
+    fn parse_shortcut_is_case_and_alias_insensitive() {
+        assert_eq!(dbg_shortcut("Cmd+K"), dbg_shortcut("command+k"));
+        assert_eq!(dbg_shortcut("CommandOrControl+Shift+Space"), dbg_shortcut("cmd+shift+space"));
+        assert_eq!(dbg_shortcut("Cmd+Enter"), dbg_shortcut("cmd+return"));
+        assert_eq!(dbg_shortcut("Option+A"), dbg_shortcut("alt+a"));
+    }
+
+    #[test]
+    fn parse_shortcut_requires_a_final_key() {
+        assert!(parse_shortcut("Cmd+Shift").is_err());
+        assert!(parse_shortcut("").is_err());
+    }
+
+    #[test]
+    fn parse_shortcut_rejects_unsupported_parts() {
+        assert!(parse_shortcut("Cmd+1").is_err());   // digits unsupported
+        assert!(parse_shortcut("Hyper+K").is_err()); // unknown modifier
+        assert!(parse_shortcut("Cmd+F1").is_err());  // multi-char non-word
+    }
+
+    #[test]
+    fn clamp_keeps_in_bounds_position_and_pins_overflow() {
+        let mp = PhysicalPosition::new(0, 0);
+        let ms = PhysicalSize::new(1920u32, 1080u32);
+        let ws = PhysicalSize::new(768u32, 112u32);
+        assert_eq!(clamp_to_monitor(&SavedWindowPosition { x: 100, y: 200 }, &mp, &ms, ws), (100, 200));
+        assert_eq!(
+            clamp_to_monitor(&SavedWindowPosition { x: 9000, y: 9000 }, &mp, &ms, ws),
+            (1920 - 768, 1080 - 112)
+        );
+    }
+
+    #[test]
+    fn clamp_does_not_panic_when_window_larger_than_monitor() {
+        // regression: max < min previously panicked inside i32::clamp
+        let mp = PhysicalPosition::new(100, 100);
+        let ms = PhysicalSize::new(400u32, 300u32);
+        let ws = PhysicalSize::new(768u32, 112u32); // wider than the monitor
+        assert_eq!(
+            clamp_to_monitor(&SavedWindowPosition { x: 9000, y: 9000 }, &mp, &ms, ws),
+            (100, 100 + (300 - 112)) // x pinned to origin (window too wide), y pinned to bottom edge
+        );
+    }
+
+    #[test]
+    fn centered_position_honors_monitor_origin() {
+        assert_eq!(
+            centered_position(&PhysicalPosition::new(0, 0), &PhysicalSize::new(1000, 800), PhysicalSize::new(200, 100)),
+            (400, 350)
+        );
+        assert_eq!(
+            centered_position(&PhysicalPosition::new(1000, 500), &PhysicalSize::new(1000, 800), PhysicalSize::new(200, 100)),
+            (1400, 850)
+        );
+    }
+
+    #[test]
+    fn position_on_monitor_uses_half_open_bounds() {
+        let mp = PhysicalPosition::new(0, 0);
+        let ms = PhysicalSize::new(100u32, 100u32);
+        assert!(position_on_monitor(&SavedWindowPosition { x: 0, y: 0 }, &mp, &ms));
+        assert!(position_on_monitor(&SavedWindowPosition { x: 99, y: 99 }, &mp, &ms));
+        assert!(!position_on_monitor(&SavedWindowPosition { x: 100, y: 0 }, &mp, &ms)); // exclusive upper edge
+        assert!(!position_on_monitor(&SavedWindowPosition { x: -1, y: 0 }, &mp, &ms));
+    }
+
+    #[test]
+    fn bundle_numbers_trims_and_fences_prompts() {
+        let prompts = vec![
+            QueuedPrompt { id: "a".into(), body: "  first  ".into(), created_at: "0".into() },
+            QueuedPrompt { id: "b".into(), body: "second".into(), created_at: "0".into() },
+        ];
+        let out = format_prompt_bundle(&prompts);
+        assert!(out.starts_with("Exported from Kyu"));
+        assert!(out.contains("1. \"\"\"\nfirst\n\"\"\""));
+        assert!(out.contains("2. \"\"\"\nsecond\n\"\"\""));
+    }
 }

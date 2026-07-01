@@ -6,10 +6,11 @@ Kyu is a free, open-source macOS utility for queueing prompts when you run out o
 
 ## What It Does
 
-- Capture prompts from a Spotlight-style prompt bar.
+- Capture prompts from a Spotlight-style prompt bar (summon it with a global shortcut, `⌘⇧Space` by default).
+- Highlight `/skills` and `@context` mentions inline as you type.
 - Store prompts locally in a queue.
-- Release one prompt or the entire queue.
-- Configure a custom keyboard shortcut.
+- Release one prompt or the entire queue to the clipboard.
+- Set a custom shortcut by pressing the key combo directly in Settings.
 - Optionally start at login.
 
 ## Status
@@ -91,6 +92,22 @@ Run the Tauri shell:
 ```bash
 npm run tauri -- dev
 ```
+
+### Testing
+
+Frontend unit tests (Vitest):
+
+```bash
+npm test
+```
+
+Rust unit tests:
+
+```bash
+cd src-tauri && cargo test --no-default-features
+```
+
+Both suites run automatically on every push and pull request via GitHub Actions.
 
 ## Tech Stack
 
