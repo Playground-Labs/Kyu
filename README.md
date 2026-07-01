@@ -2,7 +2,9 @@
 
 Kyu is a free, open-source macOS utility for queueing prompts when you run out of tokens or your agents are busy. Save prompts quickly with a keyboard shortcut, then release them.
 
-![Kyu prompt bar](docs/screenshot-prompt.jpg)
+| Light | Dark |
+| :---: | :---: |
+| ![Kyu queue in light mode](docs/screenshot-queue-light.png) | ![Kyu queue in dark mode](docs/screenshot-queue-dark.png) |
 
 > 🚧 Status: early prototype.
 
