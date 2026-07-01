@@ -4,20 +4,18 @@ Kyu is a free, open-source macOS utility for queueing prompts when you run out o
 
 ![Kyu prompt bar](docs/screenshot-prompt.jpg)
 
-## What It Does
+> 🚧 Status: early prototype.
 
-- Capture prompts from a Spotlight-style prompt bar (summon it with a global shortcut, `⌘⇧Space` by default).
-- Highlight `/skills` and `@context` mentions inline as you type.
-- Store prompts locally in a queue.
-- Release one prompt or the entire queue to the clipboard.
-- Set a custom shortcut by pressing the key combo directly in Settings.
-- Optionally start at login.
+## ✨ Features
 
-## Status
+- Spotlight-style prompt bar, summoned with a global shortcut (`⌘⇧Space` by default).
+- Inline highlighting of `/skills` and `@context` mentions as you type.
+- Local prompt queue — release one prompt or the whole queue to the clipboard.
+- Custom shortcut, recorded by pressing the key combo directly in Settings.
+- Light, Dark, or Auto appearance.
+- Optional menu-bar icon and start-at-login.
 
-Kyu is currently an early prototype.
-
-## Install
+## 📦 Install
 
 ### Homebrew
 
@@ -25,108 +23,56 @@ Kyu is currently an early prototype.
 brew install --cask playground-labs/kyu/kyu
 ```
 
-The cask lives in the [`playground-labs/kyu`](https://github.com/Playground-Labs/homebrew-kyu) tap (source: [`packaging/homebrew/kyu.rb`](packaging/homebrew/kyu.rb)).
+The cask lives in the [`playground-labs/kyu`](https://github.com/Playground-Labs/homebrew-kyu) tap.
 
 ### Direct download
 
-Alternatively, grab the latest DMG from the [Releases page](https://github.com/Playground-Labs/Kyu/releases/latest):
+Grab the latest DMG from the [Releases page](https://github.com/Playground-Labs/Kyu/releases/latest):
 
 - **Apple Silicon** (M1/M2/M3/M4): `Kyu_<version>_aarch64.dmg`
 - **Intel**: `Kyu_<version>_x64.dmg`
 
-Open the DMG and drag **Kyu** into Applications. The first time you launch it, macOS may block it because it is distributed outside the App Store — right-click Kyu and choose **Open**, or approve it under System Settings → Privacy & Security.
+Open the DMG and drag **Kyu** into Applications. On first launch macOS may block it because it is distributed outside the App Store — right-click Kyu and choose **Open**, or approve it under System Settings → Privacy & Security.
 
-## Install From Source
+## 🛠️ Building from source
 
-### Requirements
+### Prerequisites
 
 - macOS
-- Node.js 20+
-- npm
+- Node.js 22 and npm
 - Xcode Command Line Tools
-- Rust and Cargo
-
-Install Rust with rustup:
-
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-Restart your terminal after installing Rust.
+- Rust and Cargo — install via [rustup](https://rustup.rs) (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`), then restart your terminal.
 
 ### Setup
 
 ```bash
 git clone https://github.com/Playground-Labs/Kyu.git
-cd kyu
+cd Kyu
 npm install
 ```
 
-### Run The Tauri App
+### Run and build
 
 ```bash
-npm run tauri -- dev
+npm run tauri -- dev     # run the app in development
+npm run tauri -- build   # build a local macOS app
 ```
 
-### Build A Local macOS App
+The bundled app is written to `src-tauri/target/release/bundle/`. As with a downloaded build, macOS may prompt you to approve a local build the first time you open it.
+
+### Test
 
 ```bash
-npm run tauri -- build
+npm test                                           # frontend (Vitest)
+cd src-tauri && cargo test --no-default-features    # Rust
 ```
 
-Build output is created under:
+Both suites also run on every push and pull request via GitHub Actions.
 
-```text
-src-tauri/target/release/bundle/
-```
+## 🧰 Tech Stack
 
-Because Kyu is not distributed through the App Store, macOS may require you to approve the app in System Settings the first time you open a local build.
+Tauri 2 · React · Vite · TypeScript · Tailwind CSS · Shadcn-style local components.
 
-## Development
-
-Install dependencies:
-
-```bash
-npm install
-```
-
-Run type checking and build the frontend:
-
-```bash
-npm run build
-```
-
-Run the Tauri shell:
-
-```bash
-npm run tauri -- dev
-```
-
-### Testing
-
-Frontend unit tests (Vitest):
-
-```bash
-npm test
-```
-
-Rust unit tests:
-
-```bash
-cd src-tauri && cargo test --no-default-features
-```
-
-Both suites run automatically on every push and pull request via GitHub Actions.
-
-## Tech Stack
-
-- Tauri 2
-- React
-- Vite
-- TypeScript
-- Tailwind CSS
-- Shadcn-style local components
-
-## License
+## 📄 License
 
 Kyu is free and open source under the [MIT License](LICENSE).
